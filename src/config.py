@@ -16,5 +16,10 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-6-luna")
 # Pasta da memória permanente (somente Markdown) e remote git dela
 MEMORY_DIR = Path(os.getenv("MEMORY_DIR", ROOT / "memory")).resolve()
 MEMORY_GIT_REMOTE = os.getenv("MEMORY_GIT_REMOTE", "")
+# Identidade dos commits e token (PAT) para push via HTTPS. O token não é gravado
+# no .git/config nem no remote; é enviado só em memória, a cada push.
+MEMORY_GIT_USER_NAME = os.getenv("MEMORY_GIT_USER_NAME", "")
+MEMORY_GIT_USER_EMAIL = os.getenv("MEMORY_GIT_USER_EMAIL", "")
+MEMORY_GIT_TOKEN = os.getenv("MEMORY_GIT_TOKEN", "")
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
