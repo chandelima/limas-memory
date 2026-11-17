@@ -1,5 +1,5 @@
-"""Anexos fora do bot: tool de reenvio, saída de arquivos da Conversation, histórico compacto
-e convenções dos prompts. O fluxo pelo Telegram está em test_bot.py."""
+"""Attachments outside the bot: resend tool, file output of Conversation, compact history
+and prompt conventions. The flow through Telegram is in test_bot.py."""
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
@@ -8,13 +8,13 @@ from langchain_core.messages import AIMessage
 from attachments import reader
 from attachments.registry import AttachmentRegistry
 from attachments.tools import build_attachment_tools
+from chat_agent.agent import build_chat_agent, load_system_prompt
 from chatflow import Conversation, compact_history
 from conversation.log import ConversationLog, Message
 from curator.agent import CurateResult
 from curator.agent import load_system_prompt as curator_prompt
 from curator.service import CurationService
 from curator.tools import build_read_tools
-from responder.agent import build_responder, load_system_prompt
 from storage.store import MemoryStore
 
 ALLOWED = 42
@@ -22,7 +22,7 @@ ALLOWED = 42
 
 @pytest.fixture
 def registry(tmp_path):
-    return AttachmentRegistry(MemoryStore(tmp_path / "memoria-anexos"))
+    return AttachmentRegistry(MemoryStore(tmp_path / "attachments-memory"))
 
 
 def add_att(registry, **kw):
@@ -32,17 +32,17 @@ def add_att(registry, **kw):
     return registry.add(**base)
 
 
-# ---- tool, outbox --------------------------------------------------------------------
+# ---- tool, outbox ----------------------------------------------------------------------------
 
 
 def test_send_attachment_tool_validates_ids_and_queues_once(registry):
     outbox = []
     tool = build_attachment_tools(registry, outbox)[0]
     att = add_att(registry)
-    assert tool.invoke({"attachment_id": f"anexo:{att.id}"}).startswith("OK")
-    assert tool.invoke({"attachment_id": att.id}).endswith("já será enviado.")
+    assert tool.invoke({"attachment_id": f"attachment:{att.id}"}).startswith("OK")
+    assert tool.invoke({"attachment_id": att.id}).endswith("will already be sent.")
     assert [a.id for a in outbox] == [att.id]
-    assert tool.invoke({"attachment_id": "naoexiste"}).startswith("ERRO")
+    assert tool.invoke({"attachment_id": "nonexistent"}).startswith("ERROR")
 
 
 class ScriptedModel(FakeMessagesListChatModel):
@@ -55,7 +55,7 @@ def make_conversation(tmp_path, registry, script):
     outbox = []
     store = MemoryStore(tmp_path / "mem")
     tools = build_read_tools(store) + build_attachment_tools(registry, outbox)
-    agent = build_responder(llm=ScriptedModel(responses=script), tools=tools)
+    agent = build_chat_agent(llm=ScriptedModel(responses=script), tools=tools)
     service = CurationService(log, lambda m, c, ch: CurateResult(report="ok"), channel="t")
     return Conversation(log, service, agent, outbox), log, outbox
 
@@ -64,64 +64,64 @@ def test_conversation_collects_files_the_agent_requested(tmp_path, registry):
     att = add_att(registry)
     script = [
         AIMessage(content="", tool_calls=[{"name": "send_attachment", "args": {"attachment_id": att.id}, "id": "1"}]),
-        AIMessage(content="Aqui está o voucher."),
+        AIMessage(content="Here is the voucher."),
     ]
     conv, log, outbox = make_conversation(tmp_path, registry, script)
-    result = conv.respond("me manda o voucher")
+    result = conv.respond("send me the voucher")
     assert [f.id for f in result.files] == [att.id] and outbox == []
-    assert result.text == "Aqui está o voucher."
-    assert [m.role for m in log.messages()] == ["usuario", "assistente"]
+    assert result.text == "Here is the voucher."
+    assert [m.role for m in log.messages()] == ["user", "assistant"]
 
 
 def test_conversation_logs_attachment_ids_and_clears_stale_outbox(tmp_path, registry):
     att = add_att(registry)
     conv, log, outbox = make_conversation(tmp_path, registry, [AIMessage(content="ok")])
-    outbox.append(att)  # sobra de uma resposta anterior que falhou
-    result = conv.respond("[Arquivo enviado: v.pdf (anexo:x)]\nHotel", attachments=[att.id])
+    outbox.append(att)  # leftover from a previous reply that failed
+    result = conv.respond("[File sent: v.pdf (attachment:x)]\nHotel", attachments=[att.id])
     assert result.files == [] and log.messages()[0].attachments == [att.id]
 
 
-# ---- histórico compacto --------------------------------------------------------------
+# ---- compact history ---------------------------------------------------------------------------
 
 
 def msg(i, attachments=None, text=None, curated=False):
-    return Message(id=i, role="usuario", text=text or f"[Arquivo enviado: v{i}.pdf (anexo:a{i})]\nconteúdo {i}",
+    return Message(id=i, role="user", text=text or f"[File sent: v{i}.pdf (attachment:a{i})]\ncontent {i}",
                    at="2026-11-17T10:00:00-03:00", attachments=attachments or [], curated=curated)
 
 
 def test_compact_history_only_shrinks_curated_attachments_never_the_last_or_pending():
-    messages = [msg(1, ["a1"], curated=True), msg(2, ["a2"], curated=True), msg(3, ["a3"]), msg(4, text="oi")]
+    messages = [msg(1, ["a1"], curated=True), msg(2, ["a2"], curated=True), msg(3, ["a3"]), msg(4, text="hi")]
     out = compact_history(messages)
-    assert "conteúdo omitido" in out[0].text and out[0].text.startswith("[Arquivo enviado: v1.pdf (anexo:a1)]")
-    assert "conteúdo 1" not in out[0].text
-    assert "conteúdo 2" not in out[1].text  # curada: encurtada
-    assert out[2].text == messages[2].text  # pendente: completa (o Curator ainda não rodou)
-    assert out[3].text == "oi"
+    assert "content omitted" in out[0].text and out[0].text.startswith("[File sent: v1.pdf (attachment:a1)]")
+    assert "content 1" not in out[0].text
+    assert "content 2" not in out[1].text  # curated: shortened
+    assert out[2].text == messages[2].text  # pending: complete (the Curator has not run yet)
+    assert out[3].text == "hi"
     last_is_file = compact_history([msg(1, ["a1"], curated=True), msg(2, ["a2"], curated=True)])
-    assert "conteúdo 2" in last_is_file[1].text  # a última nunca é encurtada
-    assert compact_history([msg(1, text="sem anexo", curated=True)])[0].text == "sem anexo"
+    assert "content 2" in last_is_file[1].text  # the last one is never shortened
+    assert compact_history([msg(1, text="no attachment", curated=True)])[0].text == "no attachment"
 
 
-# ---- leitor e prompts ----------------------------------------------------------------
+# ---- reader and prompts ----------------------------------------------------------------------
 
 
 def test_guess_mime():
     assert reader.guess_mime("a.pdf", "application/octet-stream") == "application/pdf"
-    assert reader.guess_mime("FOTO.JPG", "") == "image/jpeg"
+    assert reader.guess_mime("PHOTO.JPG", "") == "image/jpeg"
     assert reader.guess_mime("x.png", "image/png") == "image/png"
     assert reader.guess_mime("x.xlsx", "application/vnd.ms-excel") == "application/vnd.ms-excel"
 
 
 def test_reader_placeholder_and_unreadable_texts_share_the_header():
-    placeholder = reader.format_placeholder("anexo:ab12cd34", "v.pdf", "viagem")
-    unreadable = reader.format_unreadable("anexo:ab12cd34", "v.pdf", "viagem")
-    assert placeholder.splitlines()[:2] == unreadable.splitlines()[:2] == ["[Arquivo enviado: v.pdf (anexo:ab12cd34)]", "Legenda: viagem"]
-    assert placeholder.endswith("(lendo o arquivo...)") and unreadable.endswith("(não foi possível ler o arquivo)")
+    placeholder = reader.format_placeholder("attachment:ab12cd34", "v.pdf", "trip")
+    unreadable = reader.format_unreadable("attachment:ab12cd34", "v.pdf", "trip")
+    assert placeholder.splitlines()[:2] == unreadable.splitlines()[:2] == ["[File sent: v.pdf (attachment:ab12cd34)]", "Caption: trip"]
+    assert placeholder.endswith("(reading the file...)") and unreadable.endswith("(could not read the file)")
 
 
 def test_prompts_describe_the_attachment_conventions():
     cur = curator_prompt()
-    assert "[Arquivo enviado: nome (anexo:ID)]" in cur and "guardar TUDO" in cur
-    assert "Fonte: anexo:ab12cd34" in cur and "anexos/" in cur
+    assert "[File sent: name (attachment:ID)]" in cur and "storing EVERYTHING" in cur
+    assert "Source: attachment:ab12cd34" in cur and "attachments/" in cur
     resp = load_system_prompt()
-    assert "send_attachment" in resp and "anexo:ID" in resp
+    assert "send_attachment" in resp and "attachment:ID" in resp

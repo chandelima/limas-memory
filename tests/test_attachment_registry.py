@@ -7,7 +7,7 @@ from storage import markdown as md
 from storage.git import MemoryGit
 from storage.store import MemoryStore, StoreError, is_protected
 
-# um file_id real do Telegram é base64url: pode ter '-' e '_' e padrões que parecem segredo
+# a real Telegram file_id is base64url: it can have '-' and '_' and patterns that look like secrets
 TRICKY_FILE_ID = "BQACAgEAAxkBAAIB-sk-AAAAAAAAAAAAAAAAAAAAAAAA_ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 
@@ -24,21 +24,21 @@ def registry(store):
 def make(registry, **kw):
     base = dict(file_id="AgACAg-xyz", file_unique_id="u1", kind="document", chat_id=42,
                 message_id=7, filename="voucher.pdf", mime="application/pdf", size=1234,
-                caption="viagem a Lisboa")
+                caption="trip to Lisbon")
     base.update(kw)
     return registry.add(**base)
 
 
-def test_add_writes_a_markdown_document_in_anexos(registry, store):
+def test_add_writes_a_markdown_document_in_attachments(registry, store):
     item = make(registry)
-    path = f"anexos/{item.id}.md"
+    path = f"attachments/{item.id}.md"
     assert (store.root / path).is_file() and path in store.list_paths()
     text = store.read_doc(path)
     meta, body = md.parse_frontmatter(text)
-    assert meta["description"] == "Arquivo voucher.pdf (application/pdf), enviado em " + item.received_at
-    assert meta["anexo_id"] == item.id and meta["file_id"] == "AgACAg-xyz" and meta["message_id"] == 7
-    assert f"# Anexo {item.id}" in body and f"Referência: anexo:{item.id}" in body
-    assert "Legenda: viagem a Lisboa" in body
+    assert meta["description"] == "File voucher.pdf (application/pdf), sent on " + item.received_at
+    assert meta["attachment_id"] == item.id and meta["file_id"] == "AgACAg-xyz" and meta["message_id"] == 7
+    assert f"# Attachment {item.id}" in body and f"Reference: attachment:{item.id}" in body
+    assert "Caption: trip to Lisbon" in body
     assert text.endswith("\n")
 
 
@@ -47,16 +47,16 @@ def test_roundtrip_and_new_instance_reads_the_files(registry, store):
     again = AttachmentRegistry(MemoryStore(store.root))
     got = again.get(item.id)
     assert got == item and again.all() == [item]
-    assert len(item.id) == 8 and item.ref == f"anexo:{item.id}"
+    assert len(item.id) == 8 and item.ref == f"attachment:{item.id}"
 
 
 def test_special_characters_survive_the_roundtrip(registry):
-    item = make(registry, filename="voucher: hotel #1 'Sol'\ndia 2.pdf", caption="legenda: com dois-pontos\n e quebra",
-                file_id="12345e6")  # parece número em YAML
+    item = make(registry, filename="voucher: hotel #1 'Sol'\nday 2.pdf", caption="caption: with a colon\n and a line break",
+                file_id="12345e6")  # looks like a number in YAML
     got = registry.get(item.id)
-    assert got.filename == item.filename and got.caption == "legenda: com dois-pontos\n e quebra".strip()
+    assert got.filename == item.filename and got.caption == "caption: with a colon\n and a line break".strip()
     assert got.file_id == "12345e6" and isinstance(got.file_id, str)
-    assert "\n" not in md.parse_frontmatter(registry.store.read_doc(f"anexos/{item.id}.md"))[0]["description"]
+    assert "\n" not in md.parse_frontmatter(registry.store.read_doc(f"attachments/{item.id}.md"))[0]["description"]
 
 
 def test_file_ids_that_look_like_secrets_are_not_rejected(registry):
@@ -66,12 +66,12 @@ def test_file_ids_that_look_like_secrets_are_not_rejected(registry):
 
 def test_get_accepts_prefix_and_case_and_rejects_paths(registry):
     item = make(registry)
-    assert registry.get(f"anexo:{item.id}").id == item.id
-    assert registry.get(f" ANEXO:{item.id.upper()} ").id == item.id
-    assert registry.get("naoexiste") is None and registry.get("") is None
-    for bad in ("../index", "..", "a/b", "anexos/" + item.id, "xyz!"):
+    assert registry.get(f"attachment:{item.id}").id == item.id
+    assert registry.get(f" ATTACHMENT:{item.id.upper()} ").id == item.id
+    assert registry.get("nonexistent") is None and registry.get("") is None
+    for bad in ("../index", "..", "a/b", "attachments/" + item.id, "xyz!"):
         assert registry.get(bad) is None
-    assert normalize_id("Anexo: AB12") == "ab12"
+    assert normalize_id("Attachment: AB12") == "ab12"
 
 
 def test_ids_are_unique(registry):
@@ -81,59 +81,59 @@ def test_ids_are_unique(registry):
 def test_all_is_sorted_and_skips_damaged_documents(registry, store):
     first = make(registry, received_at="2026-11-17T09:00:00-03:00")
     second = make(registry, received_at="2026-11-17T10:00:00-03:00")
-    store.write_doc("anexos/zzzz9999.md", "---\ndescription: quebrado\n---\n# sem campos\n", internal=True)
+    store.write_doc("attachments/zzzz9999.md", "---\ndescription: broken\n---\n# no fields\n", internal=True)
     assert [a.id for a in registry.all()] == [first.id, second.id]
     assert registry.get("zzzz9999") is None
 
 
-# ---- pasta protegida -----------------------------------------------------------------
+# ---- protected folder -----------------------------------------------------------------------
 
 
-def test_curator_cannot_write_in_anexos(store):
-    doc = "---\ndescription: x\n---\n# X\ncorpo\n"
-    for path in ("anexos/novo.md", "anexos/sub/novo.md"):
-        with pytest.raises(StoreError, match="gerenciada pelo bot"):
+def test_curator_cannot_write_in_attachments(store):
+    doc = "---\ndescription: x\n---\n# X\nbody\n"
+    for path in ("attachments/new.md", "attachments/sub/new.md"):
+        with pytest.raises(StoreError, match="managed by the bot"):
             store.write_doc(path, doc)
-    store.write_doc("anexos/novo.md", doc, internal=True)  # o código do bot pode
-    with pytest.raises(StoreError, match="gerenciada pelo bot"):
-        store.write_doc("anexos/novo.md", doc)  # e o Curator não sobrescreve o que existe
-    assert is_protected("anexos/a.md") and not is_protected("viagens/anexos.md")
+    store.write_doc("attachments/new.md", doc, internal=True)  # the bot's code can
+    with pytest.raises(StoreError, match="managed by the bot"):
+        store.write_doc("attachments/new.md", doc)  # and the Curator does not overwrite what exists
+    assert is_protected("attachments/a.md") and not is_protected("trips/attachments.md")
 
 
-def test_curator_tool_cannot_touch_anexos_but_can_read_them(tmp_path):
+def test_curator_tool_cannot_touch_attachments_but_can_read_them(tmp_path):
     store = MemoryStore(tmp_path / "memory")
     item = make(AttachmentRegistry(store))
     tools = {t.name: t for t in build_tools(store, MemoryGit(store.root))}
-    doc = "---\ndescription: x\n---\n# X\ncorpo\n"
-    out = tools["write_memory"].invoke({"path": f"anexos/{item.id}.md", "content": doc})
-    assert out.startswith("ERRO") and "gerenciada pelo bot" in out
-    assert "file_id" in tools["read_memory"].invoke({"path": f"anexos/{item.id}.md"})
-    assert f"Referência: anexo:{item.id}" in store.read_doc(f"anexos/{item.id}.md")  # intacto
+    doc = "---\ndescription: x\n---\n# X\nbody\n"
+    out = tools["write_memory"].invoke({"path": f"attachments/{item.id}.md", "content": doc})
+    assert out.startswith("ERROR") and "managed by the bot" in out
+    assert "file_id" in tools["read_memory"].invoke({"path": f"attachments/{item.id}.md"})
+    assert f"Reference: attachment:{item.id}" in store.read_doc(f"attachments/{item.id}.md")  # intact
 
 
-def test_anexos_are_hidden_from_list_search_count_and_index(registry, store):
-    item = make(registry, filename="reserva-hotel.pdf")
-    store.write_doc("viagens/lisboa.md", f"---\ndescription: Viagem a Lisboa\n---\n# Lisboa\nFonte: anexo:{item.id}\n")
-    assert [d.path for d in store.list_docs()] == ["viagens/lisboa.md"]
-    assert store.count_docs() == 1 and store.folder_counts() == {"viagens": 1}
-    assert store.list_docs("anexos") == []
-    assert [h.path for h in store.search_docs("reserva-hotel")] == []  # só o registro tem esse nome
-    assert [h.path for h in store.search_docs(item.id)] == ["viagens/lisboa.md"]
+def test_attachments_are_hidden_from_list_search_count_and_index(registry, store):
+    item = make(registry, filename="hotel-booking.pdf")
+    store.write_doc("trips/lisbon.md", f"---\ndescription: Trip to Lisbon\n---\n# Lisbon\nSource: attachment:{item.id}\n")
+    assert [d.path for d in store.list_docs()] == ["trips/lisbon.md"]
+    assert store.count_docs() == 1 and store.folder_counts() == {"trips": 1}
+    assert store.list_docs("attachments") == []
+    assert [h.path for h in store.search_docs("hotel-booking")] == []  # only the registry has this name
+    assert [h.path for h in store.search_docs(item.id)] == ["trips/lisbon.md"]
     idx.update_index(store)
-    assert "anexos" not in store.read_doc("index.md") and "viagens/lisboa.md" in store.read_doc("index.md")
-    assert idx.find_broken_links(store) == []  # os documentos de anexos continuam existindo p/ links
+    assert "attachments" not in store.read_doc("index.md") and "trips/lisbon.md" in store.read_doc("index.md")
+    assert idx.find_broken_links(store) == []  # the attachment documents still exist for links
 
 
-def test_responder_read_tools_do_not_list_anexos(registry, store):
+def test_chat_agent_read_tools_do_not_list_attachments(registry, store):
     make(registry)
     tools = {t.name: t for t in build_read_tools(store)}
-    assert tools["list_memory"].invoke({}) == "A memória está vazia."
+    assert tools["list_memory"].invoke({}) == "The memory is empty."
 
 
-def test_git_commit_includes_anexos_with_the_next_curator_commit(tmp_path):
+def test_git_commit_includes_attachments_with_the_next_curator_commit(tmp_path):
     store = MemoryStore(tmp_path / "memory")
     git = MemoryGit(store.root)
     item = make(AttachmentRegistry(store))
-    result = git.commit_and_push("docs: registra viagem")
+    result = git.commit_and_push("docs: record trip")
     assert result.sha
-    assert f"anexos/{item.id}.md" in git._git_ok("ls-files")
+    assert f"attachments/{item.id}.md" in git._git_ok("ls-files")

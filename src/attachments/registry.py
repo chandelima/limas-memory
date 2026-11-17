@@ -1,11 +1,11 @@
-"""Registro dos arquivos enviados pelo usuário, como documentos Markdown em memory/anexos/.
+"""Registry of the files sent by the user, as Markdown documents in memory/attachments/.
 
-Cada anexo é um `.md` (`anexos/<id>.md`) com os dados no frontmatter. A memória cita o
-arquivo por um ID curto (`anexo:ab12cd34`); este registro liga o ID ao `file_id` do
-Telegram e à mensagem original. Quem grava é o CÓDIGO do bot, no momento em que o arquivo
-chega, e não o Curator: a pasta `anexos/` é protegida na store (o Curator não consegue
-alterá-la, o que evitaria um ID trocado por engano) e fica fora de list/search/índice.
-Vai para o GitHub junto com a memória, no commit seguinte do Curator.
+Each attachment is an `.md` (`attachments/<id>.md`) with the data in the frontmatter. The memory
+cites the file by a short ID (`attachment:ab12cd34`); this registry links the ID to the
+Telegram `file_id` and to the original message. The bot's CODE writes it, at the moment the
+file arrives, not the Curator: the `attachments/` folder is protected in the store (the
+Curator cannot change it, which prevents an ID being swapped by mistake) and stays out of
+list/search/index. It goes to the remote along with the memory, in the Curator's next commit.
 """
 
 import re
@@ -19,24 +19,24 @@ import yaml
 from storage import markdown as md
 from storage.store import MemoryStore, StoreError
 
-PREFIX = "anexo:"
-FOLDER = "anexos"
+PREFIX = "attachment:"
+FOLDER = "attachments"
 _ID = re.compile(r"^[0-9a-f]{4,32}$")
 
 
 @dataclass
 class Attachment:
-    id: str  # curto e opaco, ex.: "ab12cd34"
-    file_id: str  # Telegram: reenvia o arquivo sem baixar de novo
+    id: str  # short and opaque, e.g. "ab12cd34"
+    file_id: str  # Telegram: sends the file again without downloading it
     file_unique_id: str
-    kind: str  # "document" ou "photo"
+    kind: str  # "document" or "photo"
     chat_id: int
-    message_id: int  # mensagem original no chat (para responder citando-a)
+    message_id: int  # original message in the chat (to reply quoting it)
     filename: str
     mime: str
     size: int
     caption: str
-    received_at: str  # ISO 8601 com fuso
+    received_at: str  # ISO 8601 with time zone
 
     @property
     def ref(self) -> str:
@@ -44,7 +44,7 @@ class Attachment:
 
 
 def normalize_id(value: str) -> str:
-    """Aceita 'ab12cd34', 'anexo:ab12cd34' e variações de caixa/espaço."""
+    """Accept 'ab12cd34', 'attachment:ab12cd34' and case/whitespace variations."""
     value = value.strip().lower()
     return value.removeprefix(PREFIX).strip()
 
@@ -54,19 +54,19 @@ def _path(attachment_id: str) -> str:
 
 
 def _render(item: Attachment) -> str:
-    description = " ".join(f"Arquivo {item.filename} ({item.mime}), enviado em {item.received_at}".split())
-    meta = {"description": description, "anexo_id": item.id, **{k: v for k, v in asdict(item).items() if k != "id"}}
+    description = " ".join(f"File {item.filename} ({item.mime}), sent on {item.received_at}".split())
+    meta = {"description": description, "attachment_id": item.id, **{k: v for k, v in asdict(item).items() if k != "id"}}
     front = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False, default_flow_style=False).strip()
     lines = [
-        f"# Anexo {item.id}",
+        f"# Attachment {item.id}",
         "",
-        f"- Arquivo: {' '.join(item.filename.split())}",
-        f"- Tipo: {item.mime}",
-        f"- Enviado em: {item.received_at}",
+        f"- File: {' '.join(item.filename.split())}",
+        f"- Type: {item.mime}",
+        f"- Sent on: {item.received_at}",
     ]
     if item.caption:
-        lines.append(f"- Legenda: {' '.join(item.caption.split())}")
-    lines += ["", f"Referência: {item.ref}"]
+        lines.append(f"- Caption: {' '.join(item.caption.split())}")
+    lines += ["", f"Reference: {item.ref}"]
     return f"---\n{front}\n---\n" + "\n".join(lines) + "\n"
 
 
@@ -75,7 +75,7 @@ def _parse(text: str) -> Attachment | None:
         meta, _ = md.parse_frontmatter(text)
         names = {f.name for f in fields(Attachment)}
         values = {k: meta[k] for k in names if k != "id"}
-        return Attachment(id=str(meta["anexo_id"]), **values)
+        return Attachment(id=str(meta["attachment_id"]), **values)
     except (md.MarkdownError, KeyError, TypeError):
         return None
 
@@ -112,16 +112,16 @@ class AttachmentRegistry:
             return self.put(item)
 
     def put(self, item: Attachment) -> Attachment:
-        """Grava um anexo com o ID já definido (usado na migração do registro antigo)."""
+        """Write an attachment with its ID already set (used when migrating the old registry)."""
         if not _ID.match(item.id):
-            raise ValueError(f"ID de anexo inválido: {item.id!r}")
+            raise ValueError(f"invalid attachment ID: {item.id!r}")
         with self._lock:
             self.store.write_doc(_path(item.id), _render(item), internal=True)
             return item
 
     def get(self, attachment_id: str) -> Attachment | None:
         attachment_id = normalize_id(attachment_id)
-        if not _ID.match(attachment_id):  # nada de caminhos: só IDs hexadecimais
+        if not _ID.match(attachment_id):  # no paths: hexadecimal IDs only
             return None
         try:
             return _parse(self.store.read_doc(_path(attachment_id)))

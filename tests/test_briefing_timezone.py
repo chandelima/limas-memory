@@ -19,7 +19,7 @@ def run(coro):
     return asyncio.run(coro)
 
 
-# ---- fuso -----------------------------------------------------------------------------
+# ---- time zone ------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -38,20 +38,20 @@ def test_parse_timezone_iana_name_keeps_daylight_saving():
     assert parse_timezone("America/Recife").key == "America/Recife"
 
 
-@pytest.mark.parametrize("bad", ["Marte/Fobos", "-25", "+15", "-03:99", "abc", "America/"])
+@pytest.mark.parametrize("bad", ["Mars/Phobos", "-25", "+15", "-03:99", "abc", "America/"])
 def test_parse_timezone_rejects_unknown_or_impossible_values(bad):
-    with pytest.raises(ValueError, match="fuso desconhecido|deslocamento"):
+    with pytest.raises(ValueError, match="unknown time zone|offset"):
         parse_timezone(bad)
 
 
-# ---- BRIEFING_TIME -----------------------------------------------------------------------
+# ---- BRIEFING_TIME ---------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "value,at,offset",
     [
         ("06:00", time(6, 0), None),
-        ("06:00-03", time(6, 0), -3),  # o formato pedido: horário colado ao deslocamento (ISO 8601)
+        ("06:00-03", time(6, 0), -3),  # the requested format: time glued to the offset (ISO 8601)
         ("6:30-03:00", time(6, 30), -3),
         ("06:00-0300", time(6, 0), -3),
         ("06:00+05:30", time(6, 0), 5.5),
@@ -74,11 +74,11 @@ def test_parse_briefing_time_accepts_the_compact_iso_form_and_the_spaced_forms(v
 def test_parse_briefing_time_with_a_named_zone_and_off_values():
     bt = parse_briefing_time("06:00 America/Recife")
     assert bt.at == time(6, 0) and bt.tz.key == "America/Recife"
-    for off in ("", "off", "OFF", "desligado", None):
+    for off in ("", "off", "OFF", "disabled", None):
         assert parse_briefing_time(off) is None
 
 
-@pytest.mark.parametrize("bad", ["06:00 Marte/Fobos", "06:00-25", "06:00 -03:99", "25:00-03", "06-03", "6 da manhã", "06:00 -"])
+@pytest.mark.parametrize("bad", ["06:00 Mars/Phobos", "06:00-25", "06:00 -03:99", "25:00-03", "06-03", "6 in the morning", "06:00 -"])
 def test_parse_briefing_time_rejects_invalid_values(bad):
     with pytest.raises(ValueError):
         parse_briefing_time(bad)
@@ -87,11 +87,11 @@ def test_parse_briefing_time_rejects_invalid_values(bad):
 def test_describe_shows_the_zone():
     assert parse_briefing_time("06:00-03").describe() == "06:00 (UTC-03:00)"
     assert parse_briefing_time("06:00 America/Recife").describe() == "06:00 (America/Recife)"
-    assert parse_briefing_time("06:00").describe() == "06:00 (fuso da máquina)"
+    assert parse_briefing_time("06:00").describe() == "06:00 (machine time zone)"
     assert parse_briefing_time("06:00Z").describe() == "06:00 (UTC)"
 
 
-# ---- agendador no fuso configurado --------------------------------------------------------
+# ---- scheduler in the configured zone ------------------------------------------------------
 
 
 class Clock:
@@ -112,11 +112,11 @@ def scheduler(tasks, tmp_path, clock, tz):
 
 
 def test_the_time_is_evaluated_in_the_configured_zone_not_the_clock_zone(tasks, tmp_path):
-    clock = Clock(datetime(2026, 11, 18, 8, 59, tzinfo=UTC))  # 05:59 em UTC-3
+    clock = Clock(datetime(2026, 11, 18, 8, 59, tzinfo=UTC))  # 05:59 in UTC-3
     sched = scheduler(tasks, tmp_path, clock, MINUS3)
     assert sched._now().hour == 5 and not sched.due_now(sched._now())
     assert sched.seconds_until_next(sched._now()) == 60
-    clock.now = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)  # 06:00 em UTC-3
+    clock.now = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)  # 06:00 in UTC-3
     assert sched.due_now(sched._now())
     assert sched.seconds_until_next(sched._now()) == 86400
 
@@ -128,8 +128,8 @@ def test_without_a_zone_the_machine_clock_is_used_unchanged(tasks, tmp_path):
 
 
 def test_the_briefing_day_follows_the_configured_zone_around_midnight_utc(tasks, tmp_path):
-    tasks.add("Consulta", date(2026, 11, 18), time(8, 0))
-    clock = Clock(datetime(2026, 11, 19, 1, 30, tzinfo=UTC))  # ainda é 18/11 22:30 em UTC-3
+    tasks.add("Appointment", date(2026, 11, 18), time(8, 0))
+    clock = Clock(datetime(2026, 11, 19, 1, 30, tzinfo=UTC))  # still 18/11 22:30 in UTC-3
     sched = scheduler(tasks, tmp_path, clock, MINUS3)
     sent = []
 
@@ -137,19 +137,19 @@ def test_the_briefing_day_follows_the_configured_zone_around_midnight_utc(tasks,
         sent.append(text)
 
     assert run(sched.send(sink)) is True
-    assert "Hoje (quarta-feira, 18/11)" in sent[0]  # e não quinta, 19/11
+    assert "Today (Wednesday, 18/11)" in sent[0]  # and not Thursday, 19/11
     assert sched.last_sent() == date(2026, 11, 18)
 
 
 def test_next_run_accounts_for_daylight_saving_changes(tasks, tmp_path):
     ny = ZoneInfo("America/New_York")
-    clock = Clock(datetime(2026, 3, 7, 7, 0, tzinfo=ny))  # véspera da mudança para o horário de verão
+    clock = Clock(datetime(2026, 3, 7, 7, 0, tzinfo=ny))  # the eve of the change to daylight saving time
     sched = scheduler(tasks, tmp_path, clock, ny)
-    # de 07:00 (EST) até 06:00 do dia seguinte (EDT) passam 22 horas, não 23
+    # from 07:00 (EST) to 06:00 the next day (EDT) is 22 hours, not 23
     assert sched.seconds_until_next(sched._now()) == 22 * 3600
 
 
-# ---- ligação no bot --------------------------------------------------------------------------
+# ---- wiring in the bot -------------------------------------------------------------------------
 
 
 def start(monkeypatch, tmp_path, value):
@@ -164,15 +164,15 @@ def start(monkeypatch, tmp_path, value):
 def test_main_passes_the_zone_to_the_scheduler_and_prints_it(monkeypatch, tmp_path, capsys):
     code, briefing = start(monkeypatch, tmp_path, "06:00-03")
     assert code == 0 and briefing.at == time(6, 0) and briefing.tz.utcoffset(None) == timedelta(hours=-3)
-    assert "Resumo da manhã: 06:00 (UTC-03:00)" in capsys.readouterr().out
+    assert "Morning briefing: 06:00 (UTC-03:00)" in capsys.readouterr().out
     code, briefing = start(monkeypatch, tmp_path, "06:00 America/Recife")
     assert briefing.tz.key == "America/Recife"
-    assert "Resumo da manhã: 06:00 (America/Recife)" in capsys.readouterr().out
+    assert "Morning briefing: 06:00 (America/Recife)" in capsys.readouterr().out
     code, briefing = start(monkeypatch, tmp_path, "06:00")
     assert briefing.tz is None
 
 
-@pytest.mark.parametrize("bad", ["06:00 Marte/Fobos", "06:00-25", "6 da manhã"])
+@pytest.mark.parametrize("bad", ["06:00 Mars/Phobos", "06:00-25", "6 in the morning"])
 def test_main_rejects_an_invalid_briefing_time_or_zone(monkeypatch, tmp_path, capsys, bad):
     code, briefing = start(monkeypatch, tmp_path, bad)
     assert code == 1 and briefing is None
