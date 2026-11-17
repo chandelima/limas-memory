@@ -29,7 +29,9 @@ class PanelItem:
     text: str
     done: bool
     on: date  # dia da ocorrência (a de hoje, para recorrentes)
-    when: str = ""  # prefixo curto: data/hora
+    due: date | None = None  # dia do compromisso (None = sem data)
+    at: time | None = None  # hora do compromisso
+    when: str = ""  # prefixo do botão, ex.: "[Amanhã 07:00]" (montado em build_items)
 
     def label(self) -> str:
         mark = "🟢" if self.done else "⭕"
@@ -37,13 +39,21 @@ class PanelItem:
         return label if len(label) <= LABEL_MAX else label[: LABEL_MAX - 1] + "…"
 
 
-def _when(due: date | None, at, today: date) -> str:
+def day_name(day: date, today: date) -> str:
+    delta = (day - today).days
+    return {0: "Hoje", 1: "Amanhã", -1: "Ontem"}.get(delta) or f"{day:%d/%m}"
+
+
+def _prefix(item: PanelItem, today: date, multi_day: bool) -> str:
+    """"[Hoje 18:00]", "[Amanhã 07:00]", "[31/01 15:00]". Com tudo no mesmo dia, só a hora."""
+    if item.due is None and item.at is None:
+        return ""
     parts = []
-    if due is not None and due != today:
-        parts.append(f"{due:%d/%m}")
-    if at:
-        parts.append(fmt_time(at))
-    return " ".join(parts)
+    if multi_day and item.due is not None:
+        parts.append(day_name(item.due, today))
+    if item.at:
+        parts.append(fmt_time(item.at))
+    return f"[{' '.join(parts)}]" if parts else ""
 
 
 def build_items(tasks: TaskStore, scope: str = "hoje", tag: str = "") -> tuple[list[PanelItem], int]:
@@ -57,23 +67,26 @@ def build_items(tasks: TaskStore, scope: str = "hoje", tag: str = "") -> tuple[l
     if scope == "pendentes":
         for t in sorted((t for t in tl.pending if not wanted or wanted in t.tags),
                         key=lambda t: (t.due_date is None, t.due_date or date.max, t.due_time or time.min)):
-            items.append(PanelItem(t.id, t.text, False, today, _when(t.due_date, t.due_time, today)))
+            items.append(PanelItem(t.id, t.text, False, today, t.due_date, t.due_time))
     else:
         agenda = tasks.agenda(today, horizon_days=3 if scope == "hoje" else 7, tag=tag)
         for t in agenda.overdue:
-            items.append(PanelItem(t.id, t.text, False, today, _when(t.due_date, t.due_time, today)))
+            items.append(PanelItem(t.id, t.text, False, today, t.due_date, t.due_time))
         for i in agenda.due_today:
-            items.append(PanelItem(i.task.id, i.task.text, i.done, today, _when(None, i.when, today)))
+            items.append(PanelItem(i.task.id, i.task.text, i.done, today, today, i.when))
         for day, day_items in agenda.upcoming.items():
             for i in day_items:
                 if not i.recurring:  # ocorrência futura de recorrente não se marca antes do dia
-                    items.append(PanelItem(i.task.id, i.task.text, False, today, _when(day, i.when, today)))
+                    items.append(PanelItem(i.task.id, i.task.text, False, today, day, i.when))
         for t in agenda.undated:
             items.append(PanelItem(t.id, t.text, False, today))
         recurring_ids = {r.id for r in tl.recurring}
         for c in tl.done:  # únicas concluídas hoje continuam visíveis, para poder desmarcar
             if c.done_on == today and c.id not in recurring_ids and (not wanted or wanted in c.tags):
-                items.append(PanelItem(c.id, c.text, True, today, _when(c.due_date, c.due_time, today)))
+                items.append(PanelItem(c.id, c.text, True, today, c.due_date, c.due_time))
+    multi_day = any(i.due is not None and i.due != today for i in items)
+    for i in items:
+        i.when = _prefix(i, today, multi_day)
     return items[:MAX_BUTTONS], len(items)
 
 
