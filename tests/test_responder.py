@@ -128,3 +128,9 @@ def test_chat_cli_without_api_key_returns_1(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", "")
     assert chat_cli.main(["--memory-dir", str(tmp_path / "m")]) == 1
     assert "OPENROUTER_API_KEY" in capsys.readouterr().err
+
+
+def test_prompt_asks_plain_text_and_reading_documents_before_answering():
+    prompt = load_system_prompt()
+    assert "TEXTO SIMPLES" in prompt and "sem Markdown" in prompt
+    assert "LEIA-O com" in prompt
