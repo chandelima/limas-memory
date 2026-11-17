@@ -158,7 +158,7 @@ class LogShipper:
         *,
         flush_seconds: float = 5,
         min_interval: float = 3,
-        header: str = "[limas-memory]",
+        header: str = "",
         keep_on_failure: int = 200,
     ):
         self.handler = handler
@@ -189,7 +189,7 @@ class LogShipper:
         if not lines:
             return 0
         sent = 0
-        messages = pack([self.header, *lines])
+        messages = pack([self.header, *lines] if self.header else lines)
         for i, message in enumerate(messages):
             wait = self.min_interval - (time.monotonic() - self._last_sent)
             if wait > 0 and self._last_sent:
@@ -198,7 +198,7 @@ class LogShipper:
                 await self.send(message)
             except Exception as exc:  # noqa: BLE001 - guarda o resto para a próxima tentativa
                 self._log.warning("não consegui enviar o log ao canal: %s: %s", type(exc).__name__, exc)
-                rest = [ln for m in messages[i:] for ln in m.split("\n") if ln != self.header]
+                rest = [ln for m in messages[i:] for ln in m.split("\n") if not (self.header and ln == self.header)]
                 self._pending = rest[-self.keep_on_failure:]
                 return sent
             self._last_sent = time.monotonic()

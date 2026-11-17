@@ -321,7 +321,8 @@ async def post_init(app: Application) -> None:
     log.info("bot iniciado (modelo %s)", config.OPENROUTER_MODEL, extra={"channel": True})
     log_handler, log_channel = app.bot_data.get("log_handler"), app.bot_data.get("log_channel_id")
     if log_handler is not None and log_channel is not None:
-        shipper = LogShipper(log_handler, lambda text: gateway.send_text(log_channel, text, raw=True))
+        shipper = LogShipper(log_handler, lambda text: gateway.send_text(log_channel, text, raw=True),
+                             header=config.LOG_CHANNEL_HEADER)
         app.bot_data["log_shipper"] = asyncio.create_task(shipper.run(stop))
     allowed = app.bot_data.get("allowed_user_id")
     briefing = getattr(app.bot_data["handlers"], "briefing", None)

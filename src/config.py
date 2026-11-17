@@ -48,4 +48,5 @@ BRIEFING_STATE_FILE = Path(os.getenv("BRIEFING_STATE_FILE", ROOT / "data" / "bri
 # avisos (ID numérico como -1001234567890 ou @nomedocanal; vazio = sem canal) com o nível mínimo
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID", "")
+LOG_CHANNEL_HEADER = os.getenv("LOG_CHANNEL_HEADER", "")  # opcional: identifica o app num canal compartilhado
 LOG_CHANNEL_LEVEL = os.getenv("LOG_CHANNEL_LEVEL", "WARNING")

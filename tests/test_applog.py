@@ -207,7 +207,7 @@ def shipper(handler, sink, **kw):
     return LogShipper(handler, sink, **kw)
 
 
-def test_flush_sends_one_batched_message_with_a_header_and_collapses_repeats():
+def test_flush_sends_one_batched_message_without_header_by_default_and_collapses_repeats():
     handler, sink = ChannelHandler(), Sink()
     for _ in range(3):
         handler.emit(record("mesma falha"))
@@ -292,3 +292,10 @@ def test_run_flushes_periodically_and_once_more_on_stop():
 
     run(scenario())
     assert len(sink.sent) == 2 and "primeiro" in sink.sent[0] and "na despedida" in sink.sent[1]
+
+
+def test_optional_header_identifies_the_app_in_a_shared_channel():
+    handler, sink = ChannelHandler(), Sink()
+    handler.emit(record("falha"))
+    run(shipper(handler, sink, header="[meu-app]").flush())
+    assert sink.sent[0].startswith("[meu-app]" + chr(10))
