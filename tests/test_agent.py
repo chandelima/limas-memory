@@ -153,6 +153,15 @@ def test_trace_pairs_each_call_with_its_result(mem):
     assert result.trace[1].args["path"] == "a.md"
 
 
+def test_prompt_asks_for_english_frontmatter_keys():
+    prompt = load_system_prompt()
+    assert "As CHAVES do frontmatter são SEMPRE em inglês" in prompt
+    for key in ("`description`", "`origin_date`", "`channel`"):
+        assert key in prompt
+    assert "nada de `data_origem` ou `canal`" in prompt  # só os valores e o texto ficam em português
+    assert "`CANAL:`" in prompt  # o canal continua sendo informado e registrado
+
+
 def test_prompt_defines_title_contested_and_hypothesis_conventions():
     prompt = load_system_prompt()
     assert "Comece o corpo de todo documento com um título `# `" in prompt

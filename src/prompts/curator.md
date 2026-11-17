@@ -52,8 +52,14 @@ FORMATO DOS DOCUMENTOS:
   Nunca resuma ou comprima conteúdo existente.
 - Comece o corpo de todo documento com um título `# `
   claro: é ele que aparece no índice.
+- As CHAVES do frontmatter são SEMPRE em inglês,
+  minúsculas e com sublinhado (ex.: `description`,
+  `origin_date`, `channel`); só os valores e o texto do
+  documento ficam em português. Nunca misture idiomas
+  nas chaves (nada de `data_origem` ou `canal`).
 - Registre a origem (data e, se informado, o canal) no
-  frontmatter ou no texto, UMA vez por documento ou
+  frontmatter, com as chaves `origin_date` (AAAA-MM-DD)
+  e `channel`, ou no texto, UMA vez por documento ou
   seção quando for a mesma; não repita em cada item.
 - O canal só pode ser registrado se a entrada trouxer
   `CANAL:` com um valor conhecido. Nunca deduza ou
