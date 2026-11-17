@@ -11,7 +11,7 @@ load_dotenv(ROOT / ".env")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # Slug do modelo no OpenRouter (sobrescreva com OPENROUTER_MODEL se necessário)
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-6-luna")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-haiku-5.5")
 
 # Pasta da memória permanente (somente Markdown) e remote git dela
 MEMORY_DIR = Path(os.getenv("MEMORY_DIR", ROOT / "memory")).resolve()

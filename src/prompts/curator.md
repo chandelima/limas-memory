@@ -52,3 +52,19 @@ FORMATO DOS DOCUMENTOS:
   Nunca resuma ou comprima conteúdo existente.
 - Registre a origem (ex.: data e canal da mensagem)
   no frontmatter ou no texto.
+
+FLUXO DE TRABALHO:
+
+1. Use `list_memory` e `search_memory` ANTES de escrever.
+2. Leia com `read_memory` os documentos relacionados.
+3. Decida o que tem valor futuro. Se nada tiver, não
+   escreva nada e vá direto ao passo 6.
+4. Use `write_memory` (documento inteiro) para criar
+   ou atualizar. Ao atualizar, parta do conteúdo atual.
+5. Ao final, chame `update_index` e depois
+   `commit_memory` UMA vez, com mensagem descritiva
+   do que mudou e por quê.
+6. Responda com um relatório curto (não é uma conversa
+   com o usuário): documentos criados, atualizados,
+   informações ignoradas e por quê, contradições
+   encontradas e avisos (ex.: push pendente).
