@@ -84,3 +84,28 @@ def test_search_finds_lines_case_insensitive(store):
 def test_search_rejects_empty_query(store):
     with pytest.raises(StoreError):
         store.search_docs("  ")
+
+
+def _many(store, n, folder=""):
+    for i in range(n):
+        prefix = f"{folder}/" if folder else ""
+        store.write_doc(f"{prefix}d{i:03}.md", f"---\ndescription: doc {i}\n---\ncorpo {i}\n")
+
+
+def test_list_docs_paginates(store):
+    _many(store, 7)
+    page1 = store.list_docs(offset=0, limit=3)
+    page3 = store.list_docs(offset=6, limit=3)
+    assert [d.path for d in page1] == ["d000.md", "d001.md", "d002.md"]
+    assert [d.path for d in page3] == ["d006.md"]
+    assert store.count_docs() == 7
+
+
+def test_list_docs_filters_by_folder(store):
+    _many(store, 2)
+    _many(store, 3, "pessoas")
+    _many(store, 1, "pessoas/amigos")
+    assert store.count_docs("pessoas") == 4  # inclui subpastas
+    assert [d.path for d in store.list_docs("pessoas/amigos")] == ["pessoas/amigos/d000.md"]
+    assert [d.path for d in store.list_docs("(raiz)")] == ["d000.md", "d001.md"]
+    assert store.folder_counts() == {"(raiz)": 2, "pessoas": 4}

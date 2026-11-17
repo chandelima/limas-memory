@@ -14,6 +14,7 @@ from pathlib import Path
 from storage import markdown as md
 
 MAX_LINES = 300  # acima disso, avisa para dividir o documento
+ROOT_FOLDER = "(raiz)"  # nome da "pasta" dos documentos soltos na raiz
 
 _SECRET_PATTERNS = {
     "chave sk-": re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
@@ -96,15 +97,41 @@ class MemoryStore:
         """Caminhos relativos de todos os .md, incluindo index.md."""
         return [self._rel(p) for p in self._iter_docs()]
 
-    def list_docs(self) -> list[Doc]:
-        """Lista os documentos (exceto index.md) com a `description` de cada um."""
+    def _doc_paths(self, folder: str = "") -> list[str]:
+        """Caminhos dos documentos (sem index.md), opcionalmente de uma pasta."""
+        paths = [r for r in self.list_paths() if r != "index.md"]
+        folder = folder.strip().strip("/")
+        if not folder:
+            return paths
+        if folder == ROOT_FOLDER:
+            return [r for r in paths if "/" not in r]
+        return [r for r in paths if r.startswith(folder + "/")]
+
+    def folder_counts(self) -> dict[str, int]:
+        """Quantidade de documentos por pasta de primeiro nível (raiz = '(raiz)')."""
+        counts: dict[str, int] = {}
+        for r in self._doc_paths():
+            top = r.split("/", 1)[0] if "/" in r else ROOT_FOLDER
+            counts[top] = counts.get(top, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: (kv[0] != ROOT_FOLDER, kv[0].lower())))
+
+    def count_docs(self, folder: str = "") -> int:
+        return len(self._doc_paths(folder))
+
+    def list_docs(
+        self, folder: str = "", offset: int = 0, limit: int | None = None
+    ) -> list[Doc]:
+        """Documentos (exceto index.md) com a `description` de cada um.
+
+        `folder` filtra por pasta ('pessoas', 'pessoas/amigos' ou '(raiz)');
+        `offset`/`limit` paginam. Só os documentos da página são lidos do disco.
+        """
+        paths = self._doc_paths(folder)
+        paths = paths[offset : None if limit is None else offset + limit]
         docs = []
-        for p in self._iter_docs():
-            rel = self._rel(p)
-            if rel == "index.md":
-                continue
+        for rel in paths:
             try:
-                meta, _ = _parse(p.read_text(encoding="utf-8"))
+                meta, _ = _parse((self.root / rel).read_text(encoding="utf-8"))
             except StoreError:
                 meta = {}
             docs.append(Doc(rel, str(meta.get("description", "")).strip()))
