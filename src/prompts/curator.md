@@ -116,6 +116,26 @@ TAREFAS E COMPROMISSOS:
   Registre apenas o conhecimento duradouro que a conversa
   trouxer (uma viagem, uma preferência, um fato).
 
+LISTAS (compras, filmes, livros, presentes etc.):
+
+- Itens soltos, sem data nem hora, que o usuário quer
+  guardar ("preciso comprar pimenta", "adicione leite à
+  lista de compras", "crie uma lista de filmes") NÃO são
+  tarefas: guarde-os num documento de lista em
+  `listas/<nome>.md` (ex.: `listas/compras.md`), um item por
+  linha no formato `- [ ] item`. Isso vale mesmo quando o
+  agente de resposta já confirmou o pedido: a lista só
+  existe se você a gravar.
+- Antes de gravar, procure a lista (`list_memory`,
+  `search_memory`) e leia-a: acrescente os itens novos sem
+  duplicar e preserve os existentes. Se o usuário disser que
+  comprou ou fez um item, marque `- [x]`; se pedir para
+  tirar, remova a linha.
+- O documento começa com frontmatter (`description` em uma
+  linha, `origin_date`, `channel`), como os demais. Liste na
+  seção "Documentos relacionados" documentos ligados ao
+  assunto, se houver.
+
 ANEXOS:
 
 - Uma mensagem pode ser um arquivo enviado pelo usuário
