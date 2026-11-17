@@ -11,11 +11,11 @@ Two agents with strictly separated jobs:
 
 | Agent | Job | Memory access |
 |---|---|---|
-| **Responder** | Talks to you, reads the memory, manages your tasks | Read-only (plus the task and attachment tools) |
+| **Chat Agent** | Talks to you, reads the memory, manages your tasks | Read-only (plus the task and attachment tools) |
 | **Memory Curator** | Decides what has lasting value and writes it down | The **only** writer of `memory/` |
 
 ```
-Telegram ──► bot ──► Responder ──► reads memory/ ──► reply (+ task buttons)
+Telegram ──► bot ──► Chat Agent ──► reads memory/ ──► reply (+ task buttons)
                │
                └─► conversation history ──(after N s of silence, or /curate)──► Curator ──► memory/ ──► git commit + push
 ```
@@ -33,7 +33,7 @@ Telegram ──► bot ──► Responder ──► reads memory/ ──► rep
 
 ## Features
 
-- **Chat with memory**: ask about your trips, preferences, projects, people. The Responder consults the memory
+- **Chat with memory**: ask about your trips, preferences, projects, people. The chat agent consults the memory
   before answering.
 - **Attachments**: send a PDF or an image (a trip voucher, a receipt). It is read by a model, the full content is
   kept in the memory (by design: you decide what is stored), and the original file can be sent back on request.
@@ -172,6 +172,6 @@ python evals/compare.py --models openai/gpt-6-luna,anthropic/claude-haiku-5.5 --
 
 - The memory can hold sensitive data (vouchers, reservation codes) because you asked it to keep everything. Use a
   **private** remote.
-- `data/conversa.json` keeps the last 50 curated messages in plain text on disk (they give the Responder its
+- `data/conversa.json` keeps the last 50 curated messages in plain text on disk (they give the chat agent its
   conversational context). It is git-ignored.
 - Prompts and the memory are sent to the model provider you configure on OpenRouter.
