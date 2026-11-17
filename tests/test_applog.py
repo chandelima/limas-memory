@@ -238,6 +238,7 @@ def test_a_failed_send_keeps_the_lines_and_retries_on_the_next_flush(caplog):
         assert run(ship.flush()) == 0
     assert sink.sent == [] and "could not send the log to the channel" in caplog.text
     handler.emit(record("later"))
+    ship._retry_at = 0  # (skip the back-off wait)
     assert run(ship.flush()) == 1  # the one that failed goes along with the new one
     assert "important" in sink.sent[0] and "later" in sink.sent[0]
 
@@ -299,3 +300,41 @@ def test_optional_header_identifies_the_app_in_a_shared_channel():
     handler.emit(record("failure"))
     run(shipper(handler, sink, header="[my-app]").flush())
     assert sink.sent[0].startswith("[my-app]" + chr(10))
+
+
+def test_repeated_failures_warn_once_and_back_off_instead_of_retrying_every_flush(caplog):
+    handler, sink = ChannelHandler(), Sink(fail_times=99)
+    ship = shipper(handler, sink, flush_seconds=60)  # back-off: 120 s after the first failure
+    handler.emit(record("important"))
+    with caplog.at_level(logging.INFO, logger=applog.SHIP_NAME):
+        run(ship.flush())
+        calls_after_first = sink.fail_times
+        run(ship.flush())  # inside the back-off window: it does not even try
+        run(ship.flush())
+    assert sink.fail_times == calls_after_first
+    assert caplog.text.count("could not send the log to the channel") == 1
+    assert "retrying with back-off" in caplog.text
+
+
+def test_recovery_after_failures_is_logged_and_resets_the_back_off(caplog):
+    handler, sink = ChannelHandler(), Sink(fail_times=2)
+    ship = shipper(handler, sink, flush_seconds=0.001)
+    handler.emit(record("important"))
+    with caplog.at_level(logging.INFO, logger=applog.SHIP_NAME):
+        run(ship.flush())
+        ship._retry_at = 0
+        run(ship.flush())
+        ship._retry_at = 0
+        assert run(ship.flush()) == 1  # the third attempt works
+    assert "reachable again (after 2 failed attempt(s))" in caplog.text
+    assert ship._failures == 0 and "important" in sink.sent[0]
+
+
+def test_shutdown_flush_ignores_the_back_off():
+    handler, sink = ChannelHandler(), Sink(fail_times=1)
+    ship = shipper(handler, sink, flush_seconds=60)
+    handler.emit(record("first"))
+    run(ship.flush())  # fails: now backing off for 2 minutes
+    handler.emit(record("farewell", logging.ERROR))
+    assert run(ship.flush()) == 0 and sink.sent == []
+    assert run(ship.flush(force=True)) == 1 and "farewell" in sink.sent[0]

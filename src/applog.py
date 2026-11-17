@@ -24,6 +24,7 @@ import config
 
 ROOT_NAME = "limas"
 SHIP_NAME = f"{ROOT_NAME}.logship"
+MAX_BACKOFF = 300  # seconds between attempts while the channel is unreachable
 CHANNEL_LIMIT = 3900  # margin under Telegram's 4096-character limit
 _HANDLER_MARK = "_limas_console"
 
@@ -169,6 +170,8 @@ class LogShipper:
         self.keep_on_failure = keep_on_failure
         self._pending: list[str] = []  # lines that failed to send, to try again
         self._last_sent = 0.0
+        self._failures = 0  # consecutive failed sends
+        self._retry_at = 0.0  # no attempt before this instant (exponential back-off)
         self._log = logging.getLogger(SHIP_NAME)
 
     def _drain(self) -> list[str]:
@@ -183,8 +186,11 @@ class LogShipper:
             self.handler.dropped = 0
         return lines
 
-    async def flush(self) -> int:
-        """Send what is in the queue. Return how many messages were sent."""
+    async def flush(self, force: bool = False) -> int:
+        """Send what is in the queue. Return how many messages were sent. While the channel is
+        unreachable, attempts are spaced out (back-off) and the lines keep accumulating."""
+        if self._failures and not force and time.monotonic() < self._retry_at:
+            return 0
         lines = collapse(self._drain())
         if not lines:
             return 0
@@ -197,12 +203,19 @@ class LogShipper:
             try:
                 await self.send(message)
             except Exception as exc:  # noqa: BLE001 - keep the rest for the next attempt
-                self._log.warning("could not send the log to the channel: %s: %s", type(exc).__name__, exc)
+                self._failures += 1
+                self._retry_at = time.monotonic() + min(MAX_BACKOFF, self.flush_seconds * 2 ** self._failures)
+                if self._failures == 1:  # one warning per streak, not one per attempt
+                    self._log.warning("could not send the log to the channel: %s: %s (retrying with back-off)",
+                                      type(exc).__name__, exc)
                 rest = [ln for m in messages[i:] for ln in m.split("\n") if not (self.header and ln == self.header)]
                 self._pending = rest[-self.keep_on_failure:]
                 return sent
             self._last_sent = time.monotonic()
             sent += 1
+        if self._failures and sent:
+            self._log.info("the log channel is reachable again (after %d failed attempt(s))", self._failures)
+            self._failures = 0
         return sent
 
     async def run(self, stop: asyncio.Event) -> None:
@@ -212,7 +225,7 @@ class LogShipper:
             except asyncio.TimeoutError:
                 pass
             await self.flush()
-        await self.flush()  # farewell: what is left on shutdown
+        await self.flush(force=True)  # farewell: what is left on shutdown
 
 
 # ---- configuration -----------------------------------------------------------------------------------
