@@ -4,31 +4,31 @@ from storage import markdown as md
 
 
 def test_parse_frontmatter():
-    meta, body = md.parse_frontmatter("---\ndescription: oi\ntags: [a, b]\n---\n# T\ncorpo\n")
-    assert meta == {"description": "oi", "tags": ["a", "b"]}
-    assert body == "# T\ncorpo\n"
+    meta, body = md.parse_frontmatter("---\ndescription: hi\ntags: [a, b]\n---\n# T\nbody\n")
+    assert meta == {"description": "hi", "tags": ["a", "b"]}
+    assert body == "# T\nbody\n"
 
 
 def test_parse_frontmatter_absent():
-    assert md.parse_frontmatter("# T\ncorpo") == ({}, "# T\ncorpo")
+    assert md.parse_frontmatter("# T\nbody") == ({}, "# T\nbody")
 
 
 def test_parse_frontmatter_invalid():
     with pytest.raises(md.MarkdownError):
-        md.parse_frontmatter("---\na: [\n---\ncorpo")
+        md.parse_frontmatter("---\na: [\n---\nbody")
     with pytest.raises(md.MarkdownError):
-        md.parse_frontmatter("---\n- lista\n---\ncorpo")
+        md.parse_frontmatter("---\n- list\n---\nbody")
 
 
 @pytest.mark.parametrize(
     "line,expected",
     [
         ("# A", (1, "A")),
-        ("### Título longo", (3, "Título longo")),
-        ("## Fechado ##", (2, "Fechado")),
-        ("####### sete", None),
-        ("#sem espaço", None),
-        ("texto # no meio", None),
+        ("### Long title", (3, "Long title")),
+        ("## Closed ##", (2, "Closed")),
+        ("####### seven", None),
+        ("#no space", None),
+        ("text # in the middle", None),
     ],
 )
 def test_parse_heading(line, expected):
@@ -36,14 +36,14 @@ def test_parse_heading(line, expected):
 
 
 def test_headings_ignore_code_fences():
-    body = "# A\n```\n# comentario\n```\n## B\n"
+    body = "# A\n```\n# comment\n```\n## B\n"
     assert md.headings(body) == [(1, "A"), (2, "B")]
 
 
 def test_first_heading():
-    assert md.first_heading("texto\n## B\n# A\n") == "A"
-    assert md.first_heading("texto\n## B\n# A\n", level=2) == "B"
-    assert md.first_heading("sem títulos") is None
+    assert md.first_heading("text\n## B\n# A\n") == "A"
+    assert md.first_heading("text\n## B\n# A\n", level=2) == "B"
+    assert md.first_heading("no headings") is None
 
 
 def test_extract_links_skips_images():
@@ -58,5 +58,5 @@ def test_is_external():
 
 
 def test_invalid_frontmatter_error_hints_at_quotes():
-    with pytest.raises(md.MarkdownError, match="aspas"):
-        md.parse_frontmatter("---\ndescription: Usuário - nota: algo\n---\ncorpo")
+    with pytest.raises(md.MarkdownError, match="double quotes"):
+        md.parse_frontmatter("---\ndescription: User - note: something\n---\nbody")

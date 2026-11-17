@@ -1,7 +1,7 @@
-"""Índice da memória (index.md) e validação de links relativos.
+"""Memory index (index.md) and relative-link validation.
 
-O índice é gerado a partir da `description` do frontmatter de cada documento:
-o agente de resposta lê só o índice e abre apenas o documento de que precisa.
+The index is generated from each document's frontmatter `description`:
+the chat agent reads only the index and opens just the document it needs.
 """
 
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ from storage import markdown as md
 from storage.store import MemoryStore, StoreError
 
 INDEX_PATH = "index.md"
-ROOT_GROUP = "Geral"
+ROOT_GROUP = "General"
 
 
 @dataclass
@@ -39,32 +39,32 @@ def build_index(store: MemoryStore) -> str:
 
     lines = [
         "---",
-        "description: Índice da memória, gerado a partir da description de cada documento",
+        "description: Memory index, generated from the description of each document",
         "---",
-        "# Índice",
+        "# Index",
         "",
     ]
     if not groups:
-        lines.append("_Nenhum documento ainda._")
+        lines.append("_No documents yet._")
     for folder in sorted(groups, key=lambda f: (f != ROOT_GROUP, f.lower())):
         lines += [f"## {folder}", "", *groups[folder], ""]
     return "\n".join(lines).rstrip() + "\n"
 
 
 def update_index(store: MemoryStore) -> str:
-    """Regenera e grava index.md. Devolve o caminho gravado."""
+    """Regenerate and write index.md. Return the written path."""
     return store.write_doc(INDEX_PATH, build_index(store)).path
 
 
 def find_broken_links(store: MemoryStore) -> list[BrokenLink]:
-    """Links Markdown relativos que apontam para documentos inexistentes."""
+    """Relative Markdown links that point to non-existent documents."""
     existing = set(store.list_paths())
     broken = []
     for path in sorted(existing):
         for raw in md.extract_links(store.read_doc(path)):
             target = unquote(raw.split("#", 1)[0])
             if not target or md.is_external(raw):
-                continue  # âncora local ou link externo
+                continue  # local anchor or external link
             resolved = normpath(f"{dirname(path)}/{target}" if dirname(path) else target)
             if resolved not in existing:
                 broken.append(BrokenLink(path, raw))

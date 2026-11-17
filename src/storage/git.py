@@ -1,7 +1,7 @@
-"""Versionamento da memória: a pasta memory/ é o seu próprio repositório git.
+"""Memory versioning: the memory/ folder is its own git repository.
 
-Usa o binário `git` via subprocess. Falha de push NUNCA levanta exceção: o
-commit local já preserva o histórico e o push pode ser refeito depois.
+Uses the `git` binary through subprocess. A failed push NEVER raises: the
+local commit already preserves the history and the push can be redone later.
 """
 
 import base64
@@ -10,19 +10,19 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-PUSH_TIMEOUT = 60  # segundos
+PUSH_TIMEOUT = 60  # seconds
 _FALLBACK_NAME = "Memory Curator"
 _FALLBACK_EMAIL = "memory-curator@localhost"
 _EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 class GitError(RuntimeError):
-    """Falha em operação local do git (init, add, commit)."""
+    """Failure in a local git operation (init, add, commit)."""
 
 
 @dataclass
 class CommitResult:
-    sha: str | None  # None quando não havia mudanças
+    sha: str | None  # None when there was nothing to commit
     pushed: bool
     push_error: str = ""
 
@@ -42,13 +42,13 @@ class MemoryGit:
         self.user_email = user_email
         self.token = token
 
-    # ---- execução ---------------------------------------------------------
+    # ---- execution ---------------------------------------------------------
 
     def _env(self) -> dict:
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}  # nunca travar pedindo senha
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}  # never hang asking for a password
         if self.token:
-            # Autenticação HTTPS só em memória (via variáveis de ambiente do processo):
-            # o token não vai para argv, para o remote nem para o .git/config.
+            # HTTPS authentication in memory only (via process environment variables):
+            # the token never goes to argv, to the remote or to .git/config.
             basic = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
             env.update(
                 GIT_CONFIG_COUNT="1",
@@ -77,21 +77,21 @@ class MemoryGit:
         proc = self._git(*args, input=input)
         if proc.returncode != 0:
             detail = self._redact((proc.stderr or proc.stdout).strip())
-            raise GitError(f"git {args[0]} falhou: {detail}")
+            raise GitError(f"git {args[0]} failed: {detail}")
         return proc.stdout.strip()
 
-    # ---- repositório ------------------------------------------------------
+    # ---- repository ------------------------------------------------------
 
     def is_repo(self) -> bool:
         return (self.root / ".git").exists()
 
     def ensure_repo(self) -> None:
-        """Cria o repo (branch main) se não existir e configura identidade e remote."""
+        """Create the repo (main branch) if missing and configure identity and remote."""
         self.root.mkdir(parents=True, exist_ok=True)
         if not self.is_repo():
             self._git_ok("init", "-b", "main")
-        self._git_ok("config", "core.autocrlf", "false")  # memória é sempre LF
-        # Identidade: a configurada (env) vence; senão a já existente; senão um padrão.
+        self._git_ok("config", "core.autocrlf", "false")  # memory is always LF
+        # Identity: the configured one (env) wins; otherwise the existing one; otherwise a default.
         for key, wanted, fallback in (
             ("user.name", self.user_name, _FALLBACK_NAME),
             ("user.email", self.user_email, _FALLBACK_EMAIL),
@@ -107,13 +107,13 @@ class MemoryGit:
             elif current.stdout.strip() != self.remote:
                 self._git_ok("remote", "set-url", "origin", self.remote)
 
-    # ---- commit e push ----------------------------------------------------
+    # ---- commit and push ----------------------------------------------------
 
     def commit(self, message: str) -> str | None:
-        """Commita tudo que mudou. Devolve o sha curto, ou None se nada mudou."""
+        """Commit everything that changed. Return the short sha, or None if nothing changed."""
         message = message.strip()
         if not message:
-            raise GitError("Mensagem de commit vazia")
+            raise GitError("Empty commit message")
         self._git_ok("add", "-A")
         if self._git("diff", "--cached", "--quiet").returncode == 0:
             return None
@@ -121,13 +121,13 @@ class MemoryGit:
         return self._git_ok("rev-parse", "--short", "HEAD")
 
     def push(self) -> tuple[bool, str]:
-        """(ok, erro). Nunca levanta exceção."""
+        """(ok, error). Never raises."""
         if self._git("remote", "get-url", "origin").returncode != 0:
-            return False, "Sem remote 'origin' configurado (defina MEMORY_GIT_REMOTE)"
+            return False, "No 'origin' remote configured (set MEMORY_GIT_REMOTE)"
         try:
             proc = self._git("push", "-u", "origin", "HEAD", timeout=PUSH_TIMEOUT)
         except subprocess.TimeoutExpired:
-            return False, f"Push excedeu {PUSH_TIMEOUT}s"
+            return False, f"Push exceeded {PUSH_TIMEOUT}s"
         except OSError as exc:
             return False, self._redact(str(exc))
         if proc.returncode != 0:
@@ -135,7 +135,7 @@ class MemoryGit:
         return True, ""
 
     def commit_and_push(self, message: str) -> CommitResult:
-        """Commit com a mensagem dada e tentativa de push. Sem mudanças = sem commit."""
+        """Commit with the given message and try to push. No changes = no commit."""
         self.ensure_repo()
         sha = self.commit(message)
         if sha is None:
@@ -144,27 +144,27 @@ class MemoryGit:
         return CommitResult(sha=sha, pushed=pushed, push_error=error)
 
     def sync(self, message: str) -> CommitResult:
-        """Como `commit_and_push`, mas tenta o push mesmo sem mudanças novas: envia commits
-        locais que ainda não subiram (ex.: remote configurado depois). Só mexe no repo e
-        no remote se houver o que enviar; "Everything up-to-date" conta como sucesso."""
+        """Like `commit_and_push`, but tries the push even without new changes: it sends
+        local commits that have not been pushed yet (e.g. remote configured later).
+        "Everything up-to-date" counts as success."""
         self.ensure_repo()
         sha = self.commit(message)
         if self.head() is None:
-            return CommitResult(sha=None, pushed=False)  # repo sem nenhum commit
+            return CommitResult(sha=None, pushed=False)  # repo with no commits at all
         pushed, error = self.push()
         return CommitResult(sha=sha, pushed=pushed, push_error=error)
 
     def log(self, limit: int = 10) -> list[str]:
-        """Últimos commits ('sha assunto'), mais recentes primeiro."""
+        """Latest commits ('sha subject'), newest first."""
         proc = self._git("log", f"-{limit}", "--format=%h %s")
         return proc.stdout.strip().splitlines() if proc.returncode == 0 else []
 
     def head(self) -> str | None:
-        """Sha curto do último commit, ou None se ainda não há commits."""
+        """Short sha of the latest commit, or None if there are no commits yet."""
         proc = self._git("rev-parse", "--short", "HEAD")
         return proc.stdout.strip() if proc.returncode == 0 else None
 
     def diff(self, since: str | None) -> str:
-        """Mudanças (resumo + patch) de `since` até HEAD; None = desde o início."""
+        """Changes (summary + patch) from `since` to HEAD; None = since the beginning."""
         proc = self._git("diff", "--stat", "-p", since or _EMPTY_TREE, "HEAD")
         return proc.stdout.strip() if proc.returncode == 0 else ""

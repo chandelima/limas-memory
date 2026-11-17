@@ -1,10 +1,10 @@
-"""Camada de armazenamento da memória: só Markdown, confinado a MEMORY_DIR.
+"""Memory storage layer: Markdown only, confined to MEMORY_DIR.
 
-Sem LLM aqui. Este módulo é quem garante as regras mecânicas:
-- nada fora da pasta da memória, só arquivos .md;
-- todo documento tem frontmatter com `description` (uma linha);
-- nenhum segredo (chaves/tokens) é gravado;
-- avisa quando um documento cresce demais (a ação certa é dividir, não resumir).
+No LLM here. This module enforces the mechanical rules:
+- nothing outside the memory folder, only .md files;
+- every document has frontmatter with a one-line `description`;
+- no secrets (keys/tokens) are written;
+- warns when a document grows too large (the right fix is to split, not summarize).
 """
 
 import re
@@ -13,30 +13,30 @@ from pathlib import Path
 
 from storage import markdown as md
 
-MAX_LINES = 300  # acima disso, avisa para dividir o documento
-ROOT_FOLDER = "(raiz)"  # nome da "pasta" dos documentos soltos na raiz
-# Pastas gerenciadas por código (não pelo Curator): só `write_doc(..., internal=True)` grava
-# nelas, e ficam fora de list_docs, search_docs e do índice. Leitura (read_doc) é permitida.
-PROTECTED_FOLDERS = ("anexos", "todos")
+MAX_LINES = 300  # above this, warn to split the document
+ROOT_FOLDER = "(root)"  # name of the "folder" for documents sitting at the root
+# Folders managed by code (not by the Curator): only `write_doc(..., internal=True)` writes
+# to them, and they stay out of list_docs, search_docs and the index. Reading (read_doc) is allowed.
+PROTECTED_FOLDERS = ("attachments", "todos")
 
 
 def is_protected(rel_path: str) -> bool:
     return rel_path.split("/", 1)[0] in PROTECTED_FOLDERS
 
 _SECRET_PATTERNS = {
-    "chave sk-": re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
-    "token GitHub": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
-    "chave AWS": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-    "token Slack": re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}"),
-    "chave privada": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    "atribuição de segredo": re.compile(
+    "sk- key": re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
+    "GitHub token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    "AWS key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    "Slack token": re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}"),
+    "private key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    "secret assignment": re.compile(
         r"(?i)\b(api[_-]?key|secret|token|password|senha)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+=]{12,}"
     ),
 }
 
 
 class StoreError(ValueError):
-    """Operação recusada pela camada de armazenamento."""
+    """Operation refused by the storage layer."""
 
 
 @dataclass
@@ -70,21 +70,21 @@ class MemoryStore:
     def __init__(self, root: Path):
         self.root = Path(root).resolve()
 
-    # ---- caminhos ---------------------------------------------------------
+    # ---- paths ---------------------------------------------------------
 
     def _resolve(self, rel_path: str) -> Path:
         if not rel_path or not isinstance(rel_path, str):
-            raise StoreError("Caminho vazio")
+            raise StoreError("Empty path")
         rel = Path(rel_path)
         if rel.is_absolute() or rel.drive:
-            raise StoreError("Use caminhos relativos à pasta da memória")
+            raise StoreError("Use paths relative to the memory folder")
         if rel.suffix.lower() != ".md":
-            raise StoreError("Só arquivos .md são permitidos")
+            raise StoreError("Only .md files are allowed")
         if any(part == ".git" for part in rel.parts):
-            raise StoreError("Acesso a .git não é permitido")
+            raise StoreError("Access to .git is not allowed")
         full = (self.root / rel).resolve()
         if not full.is_relative_to(self.root):
-            raise StoreError("Caminho fora da pasta da memória")
+            raise StoreError("Path outside the memory folder")
         return full
 
     def _rel(self, full: Path) -> str:
@@ -98,14 +98,14 @@ class MemoryStore:
                 continue
             yield p
 
-    # ---- leitura ----------------------------------------------------------
+    # ---- reading ----------------------------------------------------------
 
     def list_paths(self) -> list[str]:
-        """Caminhos relativos de todos os .md, incluindo index.md."""
+        """Relative paths of all .md files, including index.md."""
         return [self._rel(p) for p in self._iter_docs()]
 
     def _doc_paths(self, folder: str = "") -> list[str]:
-        """Caminhos dos documentos (sem index.md), opcionalmente de uma pasta."""
+        """Document paths (without index.md), optionally for one folder."""
         paths = [r for r in self.list_paths() if r != "index.md" and not is_protected(r)]
         folder = folder.strip().strip("/")
         if not folder:
@@ -115,7 +115,7 @@ class MemoryStore:
         return [r for r in paths if r.startswith(folder + "/")]
 
     def folder_counts(self) -> dict[str, int]:
-        """Quantidade de documentos por pasta de primeiro nível (raiz = '(raiz)')."""
+        """Number of documents per top-level folder (root = '(root)')."""
         counts: dict[str, int] = {}
         for r in self._doc_paths():
             top = r.split("/", 1)[0] if "/" in r else ROOT_FOLDER
@@ -128,10 +128,10 @@ class MemoryStore:
     def list_docs(
         self, folder: str = "", offset: int = 0, limit: int | None = None
     ) -> list[Doc]:
-        """Documentos (exceto index.md) com a `description` de cada um.
+        """Documents (except index.md) with each one's `description`.
 
-        `folder` filtra por pasta ('pessoas', 'pessoas/amigos' ou '(raiz)');
-        `offset`/`limit` paginam. Só os documentos da página são lidos do disco.
+        `folder` filters by folder ('people', 'people/friends' or '(root)');
+        `offset`/`limit` paginate. Only the documents on the page are read from disk.
         """
         paths = self._doc_paths(folder)
         paths = paths[offset : None if limit is None else offset + limit]
@@ -147,14 +147,14 @@ class MemoryStore:
     def read_doc(self, rel_path: str) -> str:
         full = self._resolve(rel_path)
         if not full.is_file():
-            raise StoreError(f"Documento não existe: {rel_path}")
+            raise StoreError(f"Document does not exist: {rel_path}")
         return full.read_text(encoding="utf-8")
 
     def search_docs(self, query: str, limit: int = 20) -> list[SearchHit]:
-        """Busca textual simples (sem diferenciar maiúsculas) em todos os documentos."""
+        """Simple case-insensitive text search across all documents."""
         q = query.strip().lower()
         if not q:
-            raise StoreError("Consulta vazia")
+            raise StoreError("Empty query")
         hits: list[SearchHit] = []
         for p in self._iter_docs():
             if is_protected(self._rel(p)):
@@ -166,43 +166,43 @@ class MemoryStore:
                         return hits
         return hits
 
-    # ---- escrita ----------------------------------------------------------
+    # ---- writing ----------------------------------------------------------
 
     def write_doc(self, rel_path: str, content: str, internal: bool = False) -> WriteResult:
-        """Grava um documento. `internal=True` é para código (não o Curator): permite as
-        pastas protegidas e dispensa a busca de segredos (metadados mecânicos)."""
+        """Write a document. `internal=True` is for code (not the Curator): it allows the
+        protected folders and skips the secret scan (mechanical metadata)."""
         full = self._resolve(rel_path)
         if is_protected(self._rel(full)) and not internal:
             raise StoreError(
-                f"A pasta {self._rel(full).split('/', 1)[0]}/ é gerenciada pelo bot: "
-                "não crie nem altere documentos nela"
+                f"The {self._rel(full).split('/', 1)[0]}/ folder is managed by the bot: "
+                "do not create or change documents in it"
             )
 
         meta, body = _parse(content)
         description = str(meta.get("description", "")).strip()
         if not description:
-            raise StoreError("O frontmatter precisa de `description:` com uma linha")
+            raise StoreError("The frontmatter needs a one-line `description:`")
         if "\n" in description:
-            raise StoreError("`description` deve ter uma única linha")
+            raise StoreError("`description` must be a single line")
         if not body.strip():
-            raise StoreError("Documento sem conteúdo")
+            raise StoreError("Document has no content")
 
         for name, pattern in ({} if internal else _SECRET_PATTERNS).items():
             if pattern.search(content):
                 raise StoreError(
-                    f"Possível segredo detectado ({name}); a memória vai para o GitHub"
+                    f"Possible secret detected ({name}); the memory is pushed to a remote"
                 )
 
         warnings = []
         n_lines = content.count("\n") + 1
         if n_lines > MAX_LINES:
             warnings.append(
-                f"Documento com {n_lines} linhas (limite {MAX_LINES}): "
-                "divida em documentos menores ligados por links, sem resumir."
+                f"Document has {n_lines} lines (limit {MAX_LINES}): "
+                "split it into smaller documents linked together, without summarizing."
             )
 
         if not content.endswith("\n"):
-            content += "\n"  # arquivos de texto terminam com quebra de linha (o git reclama)
+            content += "\n"  # text files end with a newline (git complains otherwise)
 
         created = not full.exists()
         full.parent.mkdir(parents=True, exist_ok=True)
