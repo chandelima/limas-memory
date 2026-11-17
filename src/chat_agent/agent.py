@@ -61,16 +61,39 @@ def _to_messages(history: list[ChatMessage], now: datetime, language: str = ""):
     return out
 
 
-def reply(history: list[ChatMessage], agent=None, now: datetime | None = None, language: str = "") -> ReplyResult:
-    """Answer the user's last message (which must be the last one in the history)."""
+def _report(on_step, name: str, args: dict) -> None:
+    """Progress is a nicety: a failing callback never breaks the reply."""
+    try:
+        on_step(name, args)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def reply(history: list[ChatMessage], agent=None, now: datetime | None = None, language: str = "",
+          on_step=None) -> ReplyResult:
+    """Answer the user's last message (which must be the last one in the history).
+
+    `on_step(tool_name, args)`, if given, is called as soon as the agent asks for a tool (while it is
+    still working), so the caller can show progress. It runs in the calling thread."""
     if not history or history[-1].role != "user":
         raise ValueError("The history must end with a user message")
     agent = agent or build_chat_agent()
     now = now or datetime.now().astimezone()
-    state = agent.invoke(
-        {"messages": _to_messages(history, now, language)},
-        config={"recursion_limit": RECURSION_LIMIT},
-    )
+    request = {"messages": _to_messages(history, now, language)}
+    config_ = {"recursion_limit": RECURSION_LIMIT}
+    if on_step is None or not hasattr(agent, "stream"):
+        state = agent.invoke(request, config=config_)
+    else:
+        state, seen = None, 0
+        for state in agent.stream(request, config=config_, stream_mode="values"):  # the whole state after each step
+            messages = state["messages"]
+            for message in messages[seen:]:
+                if isinstance(message, AIMessage):
+                    for call in message.tool_calls:
+                        _report(on_step, call["name"], call["args"])
+            seen = len(messages)
+        if state is None:
+            raise RuntimeError("the agent returned nothing")
     out = state["messages"]
     results = {m.tool_call_id: str(m.content) for m in out if isinstance(m, ToolMessage)}
     trace = [

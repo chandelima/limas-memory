@@ -13,7 +13,7 @@ def seen(monkeypatch):
     """Fixed agent replies; keeps the history it received on each turn."""
     calls, answers = [], iter(["R1", "R2", "R3"])
 
-    def fake_reply(history, agent=None, now=None, language=""):
+    def fake_reply(history, agent=None, now=None, language="", on_step=None):
         calls.append([(m.role, m.text) for m in history])
         return ReplyResult(text=next(answers))
 

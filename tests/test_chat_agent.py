@@ -115,3 +115,31 @@ def test_the_users_language_goes_in_the_note_of_the_last_message_only_when_known
     pt = _to_messages(history, now, "Portuguese (Brazil)")[0].content
     assert pt == "[now: 2026-11-17T09:30+00:00; reply in: Portuguese (Brazil)]\noi"
     assert "reply in:" in load_system_prompt() and "ALWAYS reply in the" in load_system_prompt()
+
+
+def test_on_step_reports_each_tool_call_while_the_agent_works(store):
+    script = [
+        tool_call("list_memory", {}, "1"),
+        tool_call("read_memory", {"path": "preferences/coffee.md"}, "2"),
+        AIMessage(content="No sugar."),
+    ]
+    agent = build_chat_agent(llm=ScriptedModel(responses=script), tools=build_read_tools(store))
+    steps = []
+    result = reply([ChatMessage("user", "coffee?")], agent=agent, on_step=lambda name, args: steps.append((name, args)))
+    assert steps == [("list_memory", {}), ("read_memory", {"path": "preferences/coffee.md"})]
+    assert result.text == "No sugar." and [e.name for e in result.trace] == ["list_memory", "read_memory"]
+
+
+def test_the_streamed_result_equals_the_plain_one_and_a_broken_callback_is_harmless(store):
+    def agent():
+        script = [tool_call("list_memory", {}, "1"), AIMessage(content="ok")]
+        return build_chat_agent(llm=ScriptedModel(responses=script), tools=build_read_tools(store))
+
+    plain = reply([ChatMessage("user", "hi")], agent=agent())
+
+    def broken(name, args):
+        raise RuntimeError("callback bug")
+
+    streamed = reply([ChatMessage("user", "hi")], agent=agent(), on_step=broken)
+    assert (streamed.text, [e.name for e in streamed.trace]) == (plain.text, [e.name for e in plain.trace])
+    assert streamed.usage.llm_calls == plain.usage.llm_calls

@@ -165,3 +165,31 @@ def test_buttons_are_sent_edited_and_answered_through_the_bot():
     keyboard = calls[0][1]["reply_markup"].inline_keyboard
     assert keyboard[0][0].text == "⭕ Task" and keyboard[0][0].callback_data == "tk:a1b2:20261118:t:"
     assert calls[1][0] == "edit" and calls[2] == ("answer", "cb", "done")
+
+
+def test_placeholder_edit_and_replace_text():
+    bot = fake_bot()
+    bot.send_message.return_value = SimpleNamespace(message_id=55)
+    bot.edit_message_text = AsyncMock()
+    gw = TelegramGateway(bot)
+    assert run(gw.send_placeholder(42, "💭 Thinking…")) == 55
+    run(gw.edit_text(42, 55, "step"))
+    assert bot.edit_message_text.await_args.kwargs == {"chat_id": 42, "message_id": 55, "text": "step"}
+    bot.send_message.reset_mock()
+    run(gw.replace_text(42, 55, "You drink **tea**. " + "p " * 3000))
+    first = bot.edit_message_text.await_args.kwargs
+    assert first["message_id"] == 55 and first["text"].startswith("You drink tea.") and len(first["text"]) <= tg.TELEGRAM_LIMIT
+    rest = [c.kwargs["text"] for c in bot.send_message.await_args_list]
+    assert rest and all(len(t) <= tg.TELEGRAM_LIMIT for t in rest)  # the overflow goes as new messages
+
+
+def test_replace_text_falls_back_to_a_new_message_and_ignores_not_modified():
+    bot = fake_bot()
+    bot.edit_message_text = AsyncMock(side_effect=RuntimeError("message to edit not found"))
+    gw = TelegramGateway(bot)
+    run(gw.replace_text(42, 55, "the answer"))
+    assert bot.send_message.await_args.kwargs["text"] == "the answer"  # the answer is never lost
+    bot.send_message.reset_mock()
+    bot.edit_message_text.side_effect = RuntimeError("Bad Request: message is not modified")
+    run(gw.replace_text(42, 55, "same"))
+    bot.send_message.assert_not_awaited()

@@ -25,7 +25,7 @@ def seen_histories(monkeypatch):
     """Swap the chat agent for fixed replies and keep the history it received."""
     seen, answers = [], iter(["Noted", "You're welcome", "Sure"])
 
-    def fake_reply(history, agent=None, now=None, language=""):
+    def fake_reply(history, agent=None, now=None, language="", on_step=None):
         seen.append([(m.role, m.text) for m in history])
         return ReplyResult(text=next(answers, "ok"))
 
@@ -123,7 +123,7 @@ def test_the_known_language_reaches_the_chat_agent(tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_reply(history, agent=None, now=None, language=""):
+    def fake_reply(history, agent=None, now=None, language="", on_step=None):
         seen["language"] = language
         return ReplyResult(text="ok")
 

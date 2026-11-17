@@ -18,9 +18,23 @@ class FakeGateway:
         self.send_file_error = None
         self.registered = None
         self.panels, self.edits, self.answers = [], [], []
+        self.progress_edits = []
 
     async def send_text(self, chat_id, text, *, raw=False):
         self.texts.append((chat_id, text))
+        self.events.append(("text", text))
+
+    async def send_placeholder(self, chat_id, text):
+        self.events.append(("placeholder", text))
+        self.progress_edits = [text]
+        return 700
+
+    async def edit_text(self, chat_id, message_id, text):
+        self.events.append(("progress", text))
+        self.progress_edits.append(text)
+
+    async def replace_text(self, chat_id, message_id, text, *, raw=False):
+        self.texts.append((chat_id, text))  # the final text, as if sent normally
         self.events.append(("text", text))
 
     async def send_buttons(self, chat_id, text, rows):

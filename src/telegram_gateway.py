@@ -59,6 +59,28 @@ class TelegramGateway:
         for chunk in split_message(text if raw else to_plain(text)) or [t("no_reply")]:
             await self.bot.send_message(chat_id=chat_id, text=chunk)
 
+    async def send_placeholder(self, chat_id: int, text: str) -> int:
+        """A message that will be edited later (see progress.py). Return its message_id."""
+        message = await self.bot.send_message(chat_id=chat_id, text=text)
+        return message.message_id
+
+    async def edit_text(self, chat_id: int, message_id: int, text: str) -> None:
+        await self.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+
+    async def replace_text(self, chat_id: int, message_id: int, text: str, *, raw: bool = False) -> None:
+        """Turn an existing message into `text` (plain, split at the Telegram limit): the first chunk
+        edits the message and the rest, if any, goes as new messages. If the edit fails, the text is
+        sent as a new message instead, so the answer is never lost."""
+        chunks = split_message(text if raw else to_plain(text)) or [t("no_reply")]
+        try:
+            await self.edit_text(chat_id, message_id, chunks[0])
+        except Exception as exc:  # noqa: BLE001
+            if "not modified" not in str(exc).lower():  # the same text is already there: nothing to do
+                log.warning("could not edit the message into the answer; sending it as a new one", exc_info=exc)
+                await self.bot.send_message(chat_id=chat_id, text=chunks[0])
+        for chunk in chunks[1:]:
+            await self.bot.send_message(chat_id=chat_id, text=chunk)
+
     @staticmethod
     def _keyboard(rows) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data) for label, data in row]

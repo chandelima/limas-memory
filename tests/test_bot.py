@@ -40,7 +40,7 @@ def env(tmp_path, monkeypatch):
                             hook=None, active=0, max_active=0,
                             read=lambda data, filename, mime: "Hotel Sol, check-in 12/03")
 
-    def fake_reply(history, agent=None, now=None, language=""):
+    def fake_reply(history, agent=None, now=None, language="", on_step=None):
         gw.events.append(("agent", history[-1].text[:30]))
         state.calls.append([(m.role, m.text) for m in history])
         state.active += 1
@@ -48,6 +48,9 @@ def env(tmp_path, monkeypatch):
         try:
             if state.hook:
                 state.hook()
+            for event in state.trace:  # the real agent reports each tool call as it happens
+                if on_step:
+                    on_step(event.name, event.args)
             if state.delay:
                 time.sleep(state.delay)
             if state.fail:
@@ -88,7 +91,7 @@ def test_message_is_persisted_and_typing_is_on_before_the_agent_runs(env):
     run(env.handlers.on_message(make_update(text="hi"), env.ctx))
     assert seen == {"status": RECEIVED, "typing": True}
     order = [k for k, _ in env.gw.events]
-    assert order == ["typing_on", "agent", "text", "typing_off"]
+    assert order == ["typing_on", "placeholder", "agent", "text", "typing_off"]  # the progress message exists before the agent runs
 
 
 def test_answer_is_sent_and_the_message_is_marked_answered(env):
@@ -770,3 +773,27 @@ def test_removing_a_task_from_its_card_asks_first_and_only_the_confirmation_remo
     assert "Tap a task to open it" in env.gw.edits[-1][2]  # back on the (now shorter) list
     run(todo_env.handlers.on_task_action(make_query(f"tx:{task.id}:20261118:t:"), env.ctx))  # again: already gone
     assert "Could not" in env.gw.answers[-1][1] and [t.id for t in todo_env.tasks.load().pending] == [other.id]
+
+
+# ---- live progress ---------------------------------------------------------------------------------
+
+
+def test_the_progress_message_shows_the_agent_steps_and_becomes_the_answer(env, monkeypatch):
+    import progress
+
+    monkeypatch.setattr(progress, "EDIT_INTERVAL", 0.01)
+    env.state.trace = [ToolEvent("list_memory", {}, "..."), ToolEvent("read_memory", {"path": "trips/x.md"}, "...")]
+    env.state.replies = iter(["Here is the answer."])
+    env.state.delay = 0.1  # leave time for the edits
+    run(env.handlers.on_message(make_update(text="tell me about the trip"), env.ctx))
+    assert env.gw.progress_edits[0] == "💭 Thinking…"
+    assert any("Reading trips/x.md" in text for text in env.gw.progress_edits)
+    kinds = [k for k, _ in env.gw.events]
+    assert kinds.index("placeholder") < kinds.index("agent") < kinds.index("text")
+    assert env.gw.sent() == ["Here is the answer."]  # the answer replaced the progress message (no extra message)
+
+
+def test_an_error_replaces_the_progress_message_with_the_generic_reply(env):
+    env.state.fail = RuntimeError("boom")
+    run(env.handlers.on_message(make_update(text="hi"), env.ctx))
+    assert env.gw.sent() == [i18n.t("error_reply")] and "placeholder" in [k for k, _ in env.gw.events]

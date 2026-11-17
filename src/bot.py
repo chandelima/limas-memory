@@ -44,6 +44,7 @@ from chat_agent.agent import build_chat_agent, default_read_tools
 from chatflow import Conversation, build_service, describe_outcome
 from conversation.log import READING, ConversationLog
 from i18n import t
+from progress import Progress
 from storage.store import MemoryStore
 from tasks import panel
 from tasks.model import TaskError
@@ -294,17 +295,20 @@ class BotHandlers:
         await self._answer(gateway, chat_id, msg_id)
 
     async def _answer(self, gateway, chat_id: int, msg_id: int) -> None:
-        """Pass the message to the chat agent, reply and resend the requested files."""
+        """Pass the message to the chat agent, reply and resend the requested files. While the agent
+        works, a progress message shows its steps; it is then edited into the final answer."""
+        progress = Progress(gateway, chat_id)
+        await progress.start()
         try:
-            result = await asyncio.to_thread(self.conversation.respond_to, msg_id)
+            result = await asyncio.to_thread(self.conversation.respond_to, msg_id, progress.push)
         except Exception as exc:  # noqa: BLE001 - never exposes internal details in the chat
             log.exception("error replying to message %s", msg_id)
             self.conversation.fail(msg_id)
-            await gateway.send_text(chat_id, t("error_reply"))
+            await progress.finish(t("error_reply"))
             return
         if self.verbose:
             self._log_trace(result)
-        await gateway.send_text(chat_id, result.text)
+        await progress.finish(result.text)
         if self.tasks is not None:  # the agent listed tasks: also show the panel with buttons
             listing = next((e for e in reversed(result.trace)
                             if e.name == "list_tasks" and not e.result.startswith("ERROR")), None)

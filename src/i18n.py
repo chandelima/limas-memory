@@ -50,6 +50,16 @@ CATALOG: dict[str, str] = {
     "file_download_failed": "I could not download the file right now. Try again in a moment.",
     "file_resend_failed": "I could not resend the file {filename}.",
     "file_resume_failed": "I could not resume a file you sent earlier; please send it again.",
+    # ---- live progress of a reply ----
+    "progress_thinking": "💭 Thinking…",
+    "progress_memory_list": "🗂️ Looking at what I remember…",
+    "progress_memory_search": "🔎 Searching the memory for “{query}”…",
+    "progress_memory_read": "📖 Reading {path}…",
+    "progress_file": "📎 Getting the file…",
+    "progress_tasks_list": "📋 Checking your tasks…",
+    "progress_tasks_add": "➕ Adding the task…",
+    "progress_tasks_update": "✏️ Updating your tasks…",
+    "progress_other": "⚙️ Working on it…",
     # ---- document reader errors ----
     "reader_unsupported": "I only read PDFs and images (JPG, PNG, WebP or GIF).",
     "reader_empty": "The file is empty.",
