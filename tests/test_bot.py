@@ -13,6 +13,12 @@ import config
 from responder.agent import ReplyResult
 
 ALLOWED = 42
+REAL_REGISTER = bot.register_commands
+
+
+@pytest.fixture(autouse=True)
+def no_telegram_calls(monkeypatch):
+    monkeypatch.setattr(bot, "register_commands", AsyncMock())
 
 
 class FakeConversation:
@@ -257,3 +263,44 @@ def test_main_warns_when_allowed_id_is_missing(monkeypatch, capsys, tmp_path):
     bot.main(["--log", str(tmp_path / "c.json")], agent=object(),
              application_factory=lambda *a: MagicMock())
     assert "TELEGRAM_ALLOWED_USER_ID não definido" in capsys.readouterr().out
+
+
+def test_commands_are_registered_for_the_allowed_user_only():
+    fake_bot = SimpleNamespace(set_my_commands=AsyncMock())
+    run(REAL_REGISTER(fake_bot, ALLOWED))
+    commands = fake_bot.set_my_commands.await_args.args[0]
+    scope = fake_bot.set_my_commands.await_args.kwargs["scope"]
+    assert [c.command for c in commands] == ["status", "curate"]
+    assert all(3 <= len(c.description) <= 256 for c in commands)
+    assert scope.chat_id == ALLOWED
+
+
+def test_commands_use_default_scope_without_allowed_user():
+    fake_bot = SimpleNamespace(set_my_commands=AsyncMock())
+    run(REAL_REGISTER(fake_bot, None))
+    assert fake_bot.set_my_commands.await_args.kwargs["scope"] is None
+
+
+def test_command_registration_failure_does_not_stop_the_bot(capsys):
+    fake_bot = SimpleNamespace(set_my_commands=AsyncMock(side_effect=RuntimeError("sem rede")))
+    run(REAL_REGISTER(fake_bot, ALLOWED))  # não levanta
+    assert "não consegui registrar os comandos" in capsys.readouterr().err
+
+
+def test_post_init_registers_commands_with_the_configured_user():
+    service = FakeService()
+    app = bot.build_application("123456:fake-token", bot.BotHandlers(FakeConversation(), ALLOWED), service)
+
+    async def lifecycle():
+        await bot.post_init(app)
+        await bot.post_shutdown(app)
+
+    run(lifecycle())
+    bot.register_commands.assert_awaited_once_with(app.bot, ALLOWED)
+
+
+def test_every_registered_command_has_a_handler():
+    handlers = bot.BotHandlers(FakeConversation(), ALLOWED)
+    app = bot.build_application("123456:fake-token", handlers, FakeService())
+    handled = {c for h in app.handlers[0] if hasattr(h, "commands") for c in h.commands}
+    assert {c.command for c in bot.COMMANDS} <= handled

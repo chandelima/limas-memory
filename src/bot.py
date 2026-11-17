@@ -17,7 +17,7 @@ import logging
 import sys
 from pathlib import Path
 
-from telegram import Update
+from telegram import BotCommand, BotCommandScopeChat, Update
 from telegram.constants import ChatAction, ChatType
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -118,8 +118,26 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     print(f"[bot] erro: {context.error!r}", file=sys.stderr, flush=True)
 
 
+COMMANDS = [
+    BotCommand("status", "Mostra o estado da memória e das mensagens pendentes"),
+    BotCommand("curate", "Processa agora as mensagens pendentes na memória"),
+]
+
+
+async def register_commands(bot, allowed_user_id: int | None) -> None:
+    """Publica a lista de comandos (menu "/" do Telegram). Com usuário autorizado, só
+    ele vê o menu; sem ele, vale o escopo padrão. Falha aqui não impede o bot de rodar."""
+    scope = BotCommandScopeChat(chat_id=allowed_user_id) if allowed_user_id else None
+    try:
+        await bot.set_my_commands(COMMANDS, scope=scope)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[bot] não consegui registrar os comandos no Telegram: {type(exc).__name__}: {exc}",
+              file=sys.stderr, flush=True)
+
+
 async def post_init(app: Application) -> None:
-    """Liga o laço que dispara o Curator por inatividade, dentro do loop do bot."""
+    """Registra os comandos e liga o laço que dispara o Curator por inatividade."""
+    await register_commands(app.bot, app.bot_data.get("allowed_user_id"))
     stop = asyncio.Event()
     service = app.bot_data["service"]
     app.bot_data["stop"] = stop
@@ -142,6 +160,7 @@ async def post_shutdown(app: Application) -> None:
 def build_application(token: str, handlers: BotHandlers, service) -> Application:
     app = Application.builder().token(token).post_init(post_init).post_shutdown(post_shutdown).build()
     app.bot_data["service"] = service
+    app.bot_data["allowed_user_id"] = handlers.allowed_user_id
     app.add_handler(CommandHandler("start", handlers.on_start))
     app.add_handler(CommandHandler("status", handlers.on_status))
     app.add_handler(CommandHandler("curate", handlers.on_curate))
