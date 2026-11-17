@@ -17,7 +17,7 @@ MAX_LINES = 300  # acima disso, avisa para dividir o documento
 ROOT_FOLDER = "(raiz)"  # nome da "pasta" dos documentos soltos na raiz
 # Pastas gerenciadas por código (não pelo Curator): só `write_doc(..., internal=True)` grava
 # nelas, e ficam fora de list_docs, search_docs e do índice. Leitura (read_doc) é permitida.
-PROTECTED_FOLDERS = ("anexos",)
+PROTECTED_FOLDERS = ("anexos", "todos")
 
 
 def is_protected(rel_path: str) -> bool:
