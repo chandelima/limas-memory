@@ -626,3 +626,12 @@ def test_added_as_plain_member_asks_for_admin_and_removal_or_private_chats_are_i
     run(env.handlers.on_added_to_chat(member_update("channel", "left"), env.ctx))
     run(env.handlers.on_added_to_chat(member_update("private", "member"), env.ctx))
     assert caplog.text == ""
+
+
+def test_automatic_report_goes_to_the_log_channel_when_configured():
+    gw = FakeGateway()
+    app = fake_app(gw)
+    app.bot_data["log_channel_id"] = -100123
+    run(bot.notify_outcome(app, ok_outcome("Criados: 1 doc")))
+    assert [cid for cid, _ in gw.texts] == [-100123]  # o usuário não recebe cópia
+    assert "Criados: 1 doc" in gw.texts[0][1]

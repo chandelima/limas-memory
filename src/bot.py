@@ -276,15 +276,17 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def notify_outcome(app: Application, outcome) -> None:
-    """Curadoria automática terminou: mostra no console e envia o relatório ao usuário.
+    """Curadoria automática terminou: mostra no console e envia o relatório ao canal de logs
+    (ou, sem canal configurado, ao usuário). O /curate manual responde ao próprio usuário.
 
     Falhas são avisadas uma vez por sequência (o serviço tenta de novo a cada poucos
     minutos; sem isso seriam várias mensagens iguais). Um sucesso reinicia a contagem.
     """
     text = describe_outcome(outcome)
     print(text, flush=True)
-    allowed = app.bot_data.get("allowed_user_id")
-    if allowed is None:
+    log_channel = app.bot_data.get("log_channel_id")
+    target = log_channel if log_channel is not None else app.bot_data.get("allowed_user_id")
+    if target is None:
         return
     if outcome.error:
         if app.bot_data.get("failure_notified"):
@@ -293,9 +295,10 @@ async def notify_outcome(app: Application, outcome) -> None:
     else:
         app.bot_data["failure_notified"] = False
     try:
-        await app.bot_data["gateway"].send_text(allowed, text)
+        await app.bot_data["gateway"].send_text(target, text, raw=log_channel is not None)
     except Exception as exc:  # noqa: BLE001 - falhar ao avisar não pode derrubar o bot
-        log.warning("não consegui enviar o relatório da curadoria ao usuário", exc_info=exc)
+        log.warning("não consegui enviar o relatório da curadoria (%s)",
+                    "canal de logs" if log_channel is not None else "usuário", exc_info=exc)
 
 
 async def _safe_recover(handlers: BotHandlers, gateway) -> None:
