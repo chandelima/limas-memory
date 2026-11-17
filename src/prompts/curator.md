@@ -50,6 +50,8 @@ FORMATO DOS DOCUMENTOS:
 - Quando um documento crescer demais, DIVIDA-O em
   documentos menores ligados por links Markdown.
   Nunca resuma ou comprima conteúdo existente.
+- Comece o corpo de todo documento com um título `# `
+  claro: é ele que aparece no índice.
 - Registre a origem (data e, se informado, o canal) no
   frontmatter ou no texto, UMA vez por documento ou
   seção quando for a mesma; não repita em cada item.
@@ -70,6 +72,22 @@ FORMATO DOS DOCUMENTOS:
   "nada foi registrado sobre X" ou "adicionado nesta
   atualização"; para mudanças, registre o valor antigo,
   o novo e a data.
+
+CONTRADIÇÕES E HIPÓTESES:
+
+- Mudança clara (o usuário mudou de situação ou de
+  ideia): atualize o valor atual e registre o anterior
+  no histórico, com as datas.
+- Contradição sem saída óbvia (duas afirmações
+  incompatíveis, ou o usuário duvida do que disse): NÃO
+  escolha um lado. Mantenha o registro anterior numa
+  seção `## Contestado`, com data, origem e o motivo da
+  dúvida; descreva o estado atual e escreva que o
+  registro não deve ser tratado como fato até o usuário
+  confirmar. Inclua "em revisão" na `description`.
+- Hipóteses, palpites e planos ainda não decididos vão
+  numa seção `## Hipóteses (não verificadas)`, com data
+  e origem. Nunca os coloque na lista de fatos.
 
 FLUXO DE TRABALHO:
 

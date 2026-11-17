@@ -183,3 +183,44 @@ def test_rejects_empty_inputs(tmp_path, capsys):
 )
 def test_contest_markers_cover_common_wordings(text):
     assert any(m in compare.norm(text) for m in compare.CONTEST_MARKERS)
+
+
+def _checks(tmp_path, key, docs_before, docs_after):
+    from compare import ScenarioRun, Snapshot, run_checks
+    from datetime import datetime
+    from storage.store import MemoryStore
+
+    store = MemoryStore(tmp_path / "m")
+    for p, t in docs_before.items():
+        store.write_doc(p, t)
+    before = Snapshot.take(store)
+    for p, t in docs_after.items():
+        store.write_doc(p, t)
+    run = ScenarioRun(model="m", run=1, scenario=key, committed=True)
+    return run_checks(key, before, Snapshot.take(store), run, datetime(2026, 11, 17).astimezone())
+
+
+def doc(title, body, desc="d"):
+    heading = f"# {title}\n" if title else ""
+    return f'---\ndescription: "{desc}"\n---\n{heading}{body}\n'
+
+
+def test_check_docs_com_titulo(tmp_path):
+    ok = _checks(tmp_path, "03", {}, {"a.md": doc("A", "x")})
+    bad = _checks(tmp_path / "b", "03", {}, {"a.md": doc(None, "x")})
+    assert ok["docs_com_titulo"] is True and bad["docs_com_titulo"] is False
+
+
+def test_check_secao_contestado_needs_a_heading_not_just_the_word(tmp_path):
+    with_heading = _checks(tmp_path, "04", {}, {"a.md": doc("B", "## Contestado\n- café sem açúcar\nchá")})
+    only_word = _checks(tmp_path / "b", "04", {}, {"a.md": doc("B", "café contestado\nchá")})
+    assert with_heading["secao_contestado"] is True
+    assert only_word["secao_contestado"] is False and only_word["marcou_contradicao"] is True
+
+
+def test_check_secao_hipoteses_and_year(tmp_path):
+    good = doc("Lisboa", "## Hipóteses (não verificadas)\n- custo menor\nMudança em 2027")
+    prose = doc("Lisboa", "Palpite não verificado sobre Lisboa em 2027")
+    assert _checks(tmp_path, "05", {}, {"l.md": good})["secao_hipoteses"] is True
+    r = _checks(tmp_path / "b", "05", {}, {"l.md": prose})
+    assert r["secao_hipoteses"] is False and r["marcou_hipotese"] is True and r["converteu_ano"] is True

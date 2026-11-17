@@ -151,3 +151,10 @@ def test_trace_pairs_each_call_with_its_result(mem):
     assert result.trace[0].result.startswith("ERRO")
     assert result.trace[1].result.startswith("OK")
     assert result.trace[1].args["path"] == "a.md"
+
+
+def test_prompt_defines_title_contested_and_hypothesis_conventions():
+    prompt = load_system_prompt()
+    assert "Comece o corpo de todo documento com um título `# `" in prompt
+    assert "## Contestado" in prompt and "em revisão" in prompt
+    assert "## Hipóteses (não verificadas)" in prompt

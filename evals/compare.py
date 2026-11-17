@@ -32,6 +32,7 @@ from curate import parse_conversation  # noqa: E402
 from curator.agent import Usage, build_curator, curate  # noqa: E402
 from curator.tools import build_tools, make_store_and_git  # noqa: E402
 from storage import index as idx  # noqa: E402
+from storage import markdown as md  # noqa: E402
 from storage.store import MemoryStore  # noqa: E402
 
 CONTEST_MARKERS = ("contest", "em revis", "contradit", "contradic", "conflit", "nao confirm", "em aberto", "nao resolvid")
@@ -73,6 +74,17 @@ class Snapshot:
         return {p: t for p, t in self.docs.items() if p != idx.INDEX_PATH}
 
 
+def _body(text: str) -> str:
+    try:
+        return md.parse_frontmatter(text)[1]
+    except md.MarkdownError:
+        return text
+
+
+def _heading_texts(*texts: str) -> list[str]:
+    return [norm(h) for t in texts for _, h in md.headings(_body(t))]
+
+
 def _has(text: str, *needles: str) -> bool:
     n = norm(text)
     return all(norm(x) in n for x in needles)
@@ -88,6 +100,7 @@ def run_checks(key: str, before: Snapshot, after: Snapshot, run: ScenarioRun, no
         "frontmatter_valido": all(d.description for d in after.store.list_docs()),
         "sem_link_quebrado": not idx.find_broken_links(after.store),
         "sem_telegram_inventado": "telegram" not in norm("\n".join(after.docs.values())),
+        "docs_com_titulo": all(md.first_heading(_body(t)) for t in after.content_docs().values()),
     }
 
     if key == "01":
@@ -109,6 +122,9 @@ def run_checks(key: str, before: Snapshot, after: Snapshot, run: ScenarioRun, no
         checks["registrou_cha"] = bool(re.search(r"\bcha\b", norm(all_text)))
         checks["preservou_cafe_antigo"] = _has(all_text, "coado") or _has(all_text, "acucar")
         checks["marcou_contradicao"] = any(m in norm(all_text) for m in CONTEST_MARKERS)
+        checks["secao_contestado"] = any(
+            "contest" in h for h in _heading_texts(*after.content_docs().values())
+        )
         checks["commitou"] = committed
     elif key == "05":
         lisboa = [t for t in new.values() if _has(t, "lisboa")]
@@ -116,6 +132,7 @@ def run_checks(key: str, before: Snapshot, after: Snapshot, run: ScenarioRun, no
         checks["criou_doc_lisboa"] = bool(lisboa)
         checks["converteu_ano"] = str(now.year + 1) in text
         checks["marcou_hipotese"] = any(m in norm(text) for m in ("hipotese", "palpite", "nao verificad"))
+        checks["secao_hipoteses"] = any("hipotes" in h for h in _heading_texts(*lisboa))
         checks["commitou"] = committed
     return checks
 

@@ -109,3 +109,10 @@ def test_list_docs_filters_by_folder(store):
     assert [d.path for d in store.list_docs("pessoas/amigos")] == ["pessoas/amigos/d000.md"]
     assert [d.path for d in store.list_docs("(raiz)")] == ["d000.md", "d001.md"]
     assert store.folder_counts() == {"(raiz)": 2, "pessoas": 4}
+
+
+def test_write_adds_trailing_newline(store):
+    store.write_doc("a.md", "---\ndescription: x\n---\n# A\nsem quebra no fim")
+    assert store.read_doc("a.md").endswith("sem quebra no fim\n")
+    store.write_doc("b.md", DOC)
+    assert store.read_doc("b.md") == DOC  # já terminava com quebra: não duplica

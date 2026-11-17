@@ -185,6 +185,9 @@ class MemoryStore:
                 "divida em documentos menores ligados por links, sem resumir."
             )
 
+        if not content.endswith("\n"):
+            content += "\n"  # arquivos de texto terminam com quebra de linha (o git reclama)
+
         created = not full.exists()
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(content, encoding="utf-8", newline="\n")
