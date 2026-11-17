@@ -45,8 +45,9 @@ DOCUMENT FORMAT:
   that summarizes the content. The index (`index.md`) is
   built from that line, and other agents decide what to
   open by reading only the index.
-- Write the documents in the language the user writes in
-  (the text and the frontmatter values). Use English,
+- Write the documents in the user's language (`USER LANGUAGE:`
+  in the input, or the one the messages are written in): the
+  text and the frontmatter values. Use English,
   lowercase kebab-case for new folder and file names
   (e.g. `trips/petrolina-2027.md`); reuse the folders that
   already exist.
@@ -185,4 +186,4 @@ WORKFLOW:
    with the user): documents created, updated, information
    ignored and why, contradictions found and warnings
    (e.g. push pending). Write the report in the user's
-   language.
+   language (`USER LANGUAGE:`), not in English.

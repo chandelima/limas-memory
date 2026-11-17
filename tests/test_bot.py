@@ -40,7 +40,7 @@ def env(tmp_path, monkeypatch):
                             hook=None, active=0, max_active=0,
                             read=lambda data, filename, mime: "Hotel Sol, check-in 12/03")
 
-    def fake_reply(history, agent=None, now=None):
+    def fake_reply(history, agent=None, now=None, language=""):
         gw.events.append(("agent", history[-1].text[:30]))
         state.calls.append([(m.role, m.text) for m in history])
         state.active += 1

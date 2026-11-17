@@ -45,8 +45,9 @@ def build_chat_agent(llm: BaseChatModel | None = None, tools: list | None = None
     )
 
 
-def _to_messages(history: list[ChatMessage], now: datetime):
-    """History -> LangChain messages. The current date goes on the last user message."""
+def _to_messages(history: list[ChatMessage], now: datetime, language: str = ""):
+    """History -> LangChain messages. The current date (and the user's language, when known)
+    goes on the last user message."""
     out = []
     for i, m in enumerate(history):
         if m.role == "assistant":
@@ -54,19 +55,20 @@ def _to_messages(history: list[ChatMessage], now: datetime):
             continue
         text = m.text
         if i == len(history) - 1:
-            text = f"[now: {now.isoformat(timespec='minutes')}]\n{text}"
+            note = f"[now: {now.isoformat(timespec='minutes')}{'; reply in: ' + language if language else ''}]"
+            text = f"{note}\n{text}"
         out.append(HumanMessage(text))
     return out
 
 
-def reply(history: list[ChatMessage], agent=None, now: datetime | None = None) -> ReplyResult:
+def reply(history: list[ChatMessage], agent=None, now: datetime | None = None, language: str = "") -> ReplyResult:
     """Answer the user's last message (which must be the last one in the history)."""
     if not history or history[-1].role != "user":
         raise ValueError("The history must end with a user message")
     agent = agent or build_chat_agent()
     now = now or datetime.now().astimezone()
     state = agent.invoke(
-        {"messages": _to_messages(history, now)},
+        {"messages": _to_messages(history, now, language)},
         config={"recursion_limit": RECURSION_LIMIT},
     )
     out = state["messages"]

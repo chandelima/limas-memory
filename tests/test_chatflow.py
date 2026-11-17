@@ -25,7 +25,7 @@ def seen_histories(monkeypatch):
     """Swap the chat agent for fixed replies and keep the history it received."""
     seen, answers = [], iter(["Noted", "You're welcome", "Sure"])
 
-    def fake_reply(history, agent=None, now=None):
+    def fake_reply(history, agent=None, now=None, language=""):
         seen.append([(m.role, m.text) for m in history])
         return ReplyResult(text=next(answers, "ok"))
 
@@ -116,3 +116,22 @@ def test_status_mentions_running_curation_only_while_it_runs(tmp_path):
     service.run_now()
     assert "curation running" in seen["during"]
     assert "curation running" not in describe_status(service)
+
+
+def test_the_known_language_reaches_the_chat_agent(tmp_path, monkeypatch):
+    import i18n
+
+    seen = {}
+
+    def fake_reply(history, agent=None, now=None, language=""):
+        seen["language"] = language
+        return ReplyResult(text="ok")
+
+    monkeypatch.setattr(chatflow, "reply", fake_reply)
+    conv, _ = make(tmp_path)
+    conv.respond("oi")
+    assert seen["language"] == ""  # not set up yet
+    current = i18n.current()
+    current.language, current.configured = "Portuguese (Brazil)", True
+    conv.respond("oi de novo")
+    assert seen["language"] == "Portuguese (Brazil)"

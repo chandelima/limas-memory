@@ -166,3 +166,10 @@ def test_prompt_defines_title_contested_and_hypothesis_conventions():
     assert "Start the body of every document with a clear `# `" in prompt
     assert "## Contested" in prompt and "under review" in prompt
     assert "## Hypotheses (unverified)" in prompt
+
+
+def test_format_input_tells_the_curator_the_users_language_when_known():
+    assert "USER LANGUAGE" not in format_input([ChatMessage("user", "hi")])
+    text = format_input([ChatMessage("user", "oi")], channel="Telegram", language="Portuguese (Brazil)")
+    assert "USER LANGUAGE: Portuguese (Brazil)" in text
+    assert "`USER LANGUAGE:`" in load_system_prompt()

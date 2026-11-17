@@ -106,3 +106,12 @@ def test_prompt_asks_reading_documents_before_answering_and_has_no_style_section
     prompt = load_system_prompt()
     assert "READ it with" in prompt
     assert "STYLE" not in prompt  # plain text is the gateway's job (to_plain)
+
+
+def test_the_users_language_goes_in_the_note_of_the_last_message_only_when_known():
+    now = datetime(2026, 11, 17, 9, 30, tzinfo=timezone.utc)
+    history = [ChatMessage("user", "oi")]
+    assert _to_messages(history, now)[0].content == "[now: 2026-11-17T09:30+00:00]\noi"
+    pt = _to_messages(history, now, "Portuguese (Brazil)")[0].content
+    assert pt == "[now: 2026-11-17T09:30+00:00; reply in: Portuguese (Brazil)]\noi"
+    assert "reply in:" in load_system_prompt() and "ALWAYS reply in the" in load_system_prompt()

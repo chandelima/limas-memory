@@ -14,11 +14,18 @@ from conversation.log import ANSWERED, FAILED, READY, RECEIVED, ConversationLog,
 from curator.agent import ToolEvent, build_curator, curate
 from curator.service import CurationService, Outcome, to_chat
 from curator.tools import default_tools, make_store_and_git
+import i18n
 from i18n import t
 
 log = get_logger("chat_agent")
 
 HISTORY_MESSAGES = 30  # how many recent messages the chat agent sees
+
+
+def user_language() -> str:
+    """The user's language, once it is known (see i18n); empty before that."""
+    current = i18n.current()
+    return current.language if current.configured else ""
 
 
 SYNC_MESSAGE = "sync: record changes made outside the Curator (tasks, attachments)"
@@ -54,7 +61,7 @@ def build_service(
     def curate_fn(messages, context, channel):
         if "agent" not in cache:
             cache["agent"] = build_curator(tools=default_tools(memory_dir))
-        result = curate(messages, context, agent=cache["agent"], channel=channel)
+        result = curate(messages, context, agent=cache["agent"], channel=channel, language=user_language())
         sync = sync_memory(memory_dir)
         if sync is not None:
             result.trace.append(sync)
@@ -141,7 +148,7 @@ class Conversation:
         history = compact_history(self.log.history(msg_id, HISTORY_MESSAGES))
         self.outbox.clear()
         started = time.monotonic()
-        result = reply([to_chat(m) for m in history], agent=self.agent)
+        result = reply([to_chat(m) for m in history], agent=self.agent, language=user_language())
         usage = result.usage
         cost = f"US$ {usage.cost:.4f}" if usage.cost_reported else "n/a"
         log.info("reply to message %s: %d tool call(s), %d file(s), %d tokens, cost %s, %.1fs",

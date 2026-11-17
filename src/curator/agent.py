@@ -115,13 +115,16 @@ def format_input(
     context: str = "",
     now: datetime | None = None,
     channel: str = "unknown",
+    language: str = "",
 ) -> str:
     now = now or datetime.now().astimezone()
     lines = [
         f"CURRENT DATE AND TIME: {now.isoformat(timespec='minutes')}",
         f"CHANNEL: {channel}",
-        "",
     ]
+    if language:
+        lines.append(f"USER LANGUAGE: {language}")
+    lines.append("")
     if context.strip():
         lines += ["CONVERSATION CONTEXT:", context.strip(), ""]
     lines.append("RECENT MESSAGES:")
@@ -138,12 +141,13 @@ def curate(
     agent=None,
     now: datetime | None = None,
     channel: str = "unknown",
+    language: str = "",
 ) -> CurateResult:
     if not messages:
         raise ValueError("No messages to curate")
     agent = agent or build_curator()
     state = agent.invoke(
-        {"messages": [HumanMessage(format_input(messages, context, now, channel))]},
+        {"messages": [HumanMessage(format_input(messages, context, now, channel, language))]},
         config={"recursion_limit": RECURSION_LIMIT},
     )
     out = state["messages"]
