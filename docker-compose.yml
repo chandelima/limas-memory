@@ -2,6 +2,11 @@ services:
   bot:
     build: .   # no `image:` here: with it, `compose pull` would try to download "limas-memory" from Docker Hub
     restart: unless-stopped
+    # DNS used by the container. If the host's resolver is flaky ("Temporary failure in name resolution"),
+    # list more than one: Docker tries them in order. Put your router's IP in DNS_PRIMARY if you prefer it.
+    dns:
+      - ${DNS_PRIMARY:-8.8.8.8}
+      - ${DNS_SECONDARY:-1.1.1.1}
     # No env_file: Portainer (stack from a Git repository) has no .env in the checkout.
     # The values come from the environment of the stack (Portainer: "Environment variables";
     # locally: the .env next to this file, which Compose reads for the ${...} below).
