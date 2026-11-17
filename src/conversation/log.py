@@ -9,7 +9,7 @@ reinícios do bot sem perder mensagens ainda não curadas.
 import json
 import os
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -22,6 +22,7 @@ class Message:
     role: str
     text: str
     at: str  # ISO 8601 com fuso
+    attachments: list[str] = field(default_factory=list)  # IDs do AttachmentRegistry
 
 
 class ConversationLog:
@@ -62,7 +63,9 @@ class ConversationLog:
 
     # ---- escrita ----------------------------------------------------------
 
-    def append(self, role: str, text: str, at: str | None = None) -> Message:
+    def append(
+        self, role: str, text: str, at: str | None = None, attachments: list[str] | None = None
+    ) -> Message:
         if role not in ROLES:
             raise ValueError(f"role deve ser um de {ROLES}")
         text = text.strip()
@@ -74,6 +77,7 @@ class ConversationLog:
                 role=role,
                 text=text,
                 at=at or datetime.now().astimezone().isoformat(timespec="seconds"),
+                attachments=list(attachments or []),
             )
             self._next_id += 1
             self._messages.append(msg)

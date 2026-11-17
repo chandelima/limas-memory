@@ -32,3 +32,8 @@ CURATOR_IDLE_SECONDS = float(os.getenv("CURATOR_IDLE_SECONDS", "600"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 _allowed = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
 TELEGRAM_ALLOWED_USER_ID = int(_allowed) if _allowed.isdigit() else None
+
+# Anexos (voucher, fotos): tabela local, modelo que lê documentos e motor de PDF do OpenRouter
+ATTACHMENTS_FILE = Path(os.getenv("ATTACHMENTS_FILE", ROOT / "data" / "anexos.json")).resolve()
+DOCUMENT_MODEL = os.getenv("DOCUMENT_MODEL", "")  # vazio = usa OPENROUTER_MODEL
+PDF_ENGINE = os.getenv("PDF_ENGINE", "")  # vazio = o OpenRouter escolhe; ou cloudflare-ai, mistral-ocr, native
