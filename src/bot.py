@@ -3,6 +3,7 @@
 Uso:
     python src/bot.py
     python src/bot.py --memory-dir D:/tmp/memoria-teste --log D:/tmp/conversa.json --idle-seconds 30
+    python src/bot.py --verbose    # mostra no console as consultas à memória de cada resposta
 
 Só o usuário em TELEGRAM_ALLOWED_USER_ID é atendido (e só em conversa privada). Sem essa
 env, o bot recusa todo mundo e imprime o ID de quem escreveu, para você configurá-la.
@@ -73,11 +74,13 @@ class BotHandlers:
         allowed_user_id: int | None,
         registry: AttachmentRegistry | None = None,
         read_document=reader.read_document,
+        verbose: bool = False,
     ):
         self.conversation = conversation
         self.allowed_user_id = allowed_user_id
         self.registry = registry  # sem registro, o bot ignora arquivos
         self.read_document = read_document
+        self.verbose = verbose  # imprime no console as consultas à memória de cada resposta
         self._lock = asyncio.Lock()  # uma conversa por vez: o histórico é sequencial
 
     def _authorized(self, update: Update) -> bool:
@@ -117,8 +120,19 @@ class BotHandlers:
                 return
             finally:
                 typing.cancel()
+        if self.verbose:
+            self._log_trace(result)
         await self._reply(update, result.text)
         await self._send_files(update, context, result.files)
+
+    @staticmethod
+    def _log_trace(result) -> None:
+        """Modo --verbose: mostra no console o que o agente consultou para responder."""
+        for event in result.trace:
+            args = ", ".join(f"{k}={v!r}" for k, v in event.args.items())
+            print(f"  [memória] {event.name}({args})", flush=True)
+        for att in result.files:
+            print(f"  [arquivo] reenviando {att.ref} ({att.filename})", flush=True)
 
     async def _send_files(self, update: Update, context: ContextTypes.DEFAULT_TYPE, files: list) -> None:
         """Reenvia os arquivos pelo file_id, citando a mensagem original quando ela existir."""
@@ -296,6 +310,8 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
                     help="inatividade antes de o Curator processar (padrão: CURATOR_IDLE_SECONDS)")
     ap.add_argument("--attachments", type=Path, default=None,
                     help="tabela de anexos (padrão: ATTACHMENTS_FILE / ./data/anexos.json)")
+    ap.add_argument("--verbose", action="store_true",
+                    help="imprime no console as consultas à memória de cada resposta")
     args = ap.parse_args(argv)
 
     if not config.TELEGRAM_BOT_TOKEN:
@@ -314,7 +330,8 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     configure_logging()
     log = ConversationLog(args.log or config.CONVERSATION_FILE)
     service = build_service(log, args.memory_dir, args.idle_seconds, channel="Telegram")
-    handlers = BotHandlers(Conversation(log, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID, registry)
+    handlers = BotHandlers(Conversation(log, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID,
+                           registry, verbose=args.verbose)
     app = application_factory(config.TELEGRAM_BOT_TOKEN, handlers, service)
 
     print(f"Bot iniciado | modelo: {config.OPENROUTER_MODEL} | memória: {args.memory_dir or config.MEMORY_DIR}")

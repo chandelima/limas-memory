@@ -1,4 +1,4 @@
-"""Fluxo de conversa compartilhado pelo terminal (chat.py) e pelo Telegram (bot.py).
+"""Fluxo de conversa usado pelo bot do Telegram (bot.py).
 
 Sem nada de interface: recebe texto, registra no histórico, consulta o agente de resposta
 e deixa o Curator trabalhar por inatividade. Quem chama cuida de mostrar o resultado.

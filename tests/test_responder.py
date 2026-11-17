@@ -5,7 +5,6 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
 
-import chat as chat_cli
 from curator.agent import ChatMessage
 from curator.tools import build_read_tools, build_tools
 from responder.agent import _to_messages, build_responder, load_system_prompt, reply
@@ -101,33 +100,6 @@ def test_reply_cannot_write_even_if_model_tries(store):
     except Exception:
         pass  # tool inexistente: o agente pode recusar a chamada
     assert not (store.root / "x.md").exists()
-
-
-def test_chat_cli_loop_keeps_history_and_exits(store, capsys):
-    script = [AIMessage(content="Oi!"), AIMessage(content="Tchau!")]
-    model = ScriptedModel(responses=script)
-    agent = build_responder(llm=model, tools=build_read_tools(store))
-    inputs = iter(["olá", "", "valeu", "sair"])
-    code = chat_cli.main([], agent=agent, read=lambda _: next(inputs), start_watcher=False)
-    out = capsys.readouterr().out
-    assert code == 0
-    assert "IA: Oi!" in out and "IA: Tchau!" in out
-
-
-def test_chat_cli_verbose_shows_memory_calls(store, capsys):
-    script = [tool_call("list_memory", {}, "1"), AIMessage(content="Achei.")]
-    agent = build_responder(llm=ScriptedModel(responses=script), tools=build_read_tools(store))
-    inputs = iter(["o que sei de café?", "sair"])
-    chat_cli.main(["--verbose"], agent=agent, read=lambda _: next(inputs), start_watcher=False)
-    assert "[memória] list_memory()" in capsys.readouterr().out
-
-
-def test_chat_cli_without_api_key_returns_1(monkeypatch, capsys, tmp_path):
-    import config
-
-    monkeypatch.setattr(config, "OPENROUTER_API_KEY", "")
-    assert chat_cli.main(["--memory-dir", str(tmp_path / "m")]) == 1
-    assert "OPENROUTER_API_KEY" in capsys.readouterr().err
 
 
 def test_prompt_asks_plain_text_and_reading_documents_before_answering():
