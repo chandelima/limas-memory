@@ -4,14 +4,18 @@ Sem nada de interface: recebe texto, registra no histórico, consulta o agente d
 e deixa o Curator trabalhar por inatividade. Quem chama cuida de mostrar o resultado.
 """
 
+import time
 from dataclasses import replace
 from pathlib import Path
 
+from applog import get_logger
 from conversation.log import ANSWERED, FAILED, READY, RECEIVED, ConversationLog, Message
 from curator.agent import build_curator, curate
 from curator.service import CurationService, Outcome, to_chat
 from curator.tools import default_tools
 from responder.agent import ReplyResult, reply
+
+log = get_logger("responder")
 
 HISTORY_MESSAGES = 30  # quantas mensagens recentes o agente de resposta enxerga
 
@@ -113,7 +117,12 @@ class Conversation:
         """Responde à mensagem `msg_id` (já gravada), lendo a memória, e registra a resposta."""
         history = compact_history(self.log.history(msg_id, HISTORY_MESSAGES))
         self.outbox.clear()
+        started = time.monotonic()
         result = reply([to_chat(m) for m in history], agent=self.agent)
+        usage = result.usage
+        cost = f"US$ {usage.cost:.4f}" if usage.cost_reported else "n/d"
+        log.info("resposta à mensagem %s: %d chamada(s) de tool, %d arquivo(s), %d tokens, custo %s, %.1fs",
+                 msg_id, len(result.trace), len(self.outbox), usage.total_tokens, cost, time.monotonic() - started)
         result.files = list(self.outbox)
         self.outbox.clear()
         self.log.append("assistente", result.text, reply_to=msg_id)

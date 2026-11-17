@@ -164,12 +164,12 @@ def test_send_with_nothing_to_say_sends_nothing_but_marks_the_day(scheduler, clo
     assert scheduler.last_sent() == date(2026, 11, 18)
 
 
-def test_send_failure_is_reported_and_not_marked(tasks, scheduler, clock, capsys):
+def test_send_failure_is_reported_and_not_marked(tasks, scheduler, clock, caplog):
     tasks.add("Consulta", date(2026, 11, 18))
     clock.now = at(18, 6, 0)
     assert run(scheduler.send(Sink(fail_times=1))) is False
     assert scheduler.last_sent() is None
-    assert "não consegui enviar o resumo" in capsys.readouterr().err
+    assert "não consegui enviar o resumo" in caplog.text
 
 
 # ---- laço ----------------------------------------------------------------------------------------

@@ -24,7 +24,6 @@ Comandos: /status e /curate (não vão para o modelo).
 
 import argparse
 import asyncio
-import logging
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -34,6 +33,7 @@ from telegram.constants import ChatType
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 import config
+from applog import LogShipper, configure_logging, get_logger, parse_channel_id
 from attachments import reader
 from briefing import BriefingScheduler, parse_briefing_time
 from attachments.registry import AttachmentRegistry
@@ -45,6 +45,8 @@ from storage.store import MemoryStore
 from tasks.store import TaskStore
 from tasks.tools import build_task_tools
 from telegram_gateway import TELEGRAM_LIMIT, TYPING_INTERVAL, TelegramGateway, split_message, to_plain  # noqa: F401
+
+log = get_logger("bot")
 
 WATCH_INTERVAL = 30  # segundos entre verificações de inatividade
 SHUTDOWN_WAIT = 30  # espera máxima por uma curadoria em andamento ao encerrar
@@ -86,10 +88,13 @@ class BotHandlers:
         if user is None or chat is None or chat.type != ChatType.PRIVATE:
             return False
         if self.allowed_user_id is None:
-            print(f"[bot] mensagem recusada do usuário id {user.id}. "
-                  f"Para liberar, defina TELEGRAM_ALLOWED_USER_ID={user.id}", flush=True)
+            log.warning("mensagem recusada do usuário id %s; para liberar, defina TELEGRAM_ALLOWED_USER_ID=%s",
+                        user.id, user.id)
             return False
-        return user.id == self.allowed_user_id
+        if user.id != self.allowed_user_id:
+            log.warning("mensagem de usuário não autorizado id=%s", user.id)
+            return False
+        return True
 
     # ---- comandos (não vão para o modelo) ------------------------------------
 
@@ -170,11 +175,12 @@ class BotHandlers:
             data = await gateway.download(att.file_id)
             text = await asyncio.to_thread(self.read_document, data, att.filename, att.mime)
         except reader.ReaderError as exc:
+            log.warning("arquivo %s não pôde ser lido: %s", att.ref, exc)
             self.conversation.fail(msg_id, text=reader.format_unreadable(att.ref, att.filename, att.caption))
             await gateway.send_text(chat_id, f"Não consegui ler esse arquivo. {exc}")
             return
         except Exception as exc:  # noqa: BLE001 - nunca expõe detalhes internos no chat
-            print(f"[bot] erro ao baixar o arquivo: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            log.exception("erro ao baixar o arquivo %s", att.ref)
             self.conversation.fail(msg_id, text=reader.format_unreadable(att.ref, att.filename, att.caption))
             await gateway.send_text(chat_id, "Não consegui baixar o arquivo agora. Tente de novo em instantes.")
             return
@@ -186,7 +192,7 @@ class BotHandlers:
         try:
             result = await asyncio.to_thread(self.conversation.respond_to, msg_id)
         except Exception as exc:  # noqa: BLE001 - nunca expõe detalhes internos no chat
-            print(f"[bot] erro ao responder: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            log.exception("erro ao responder à mensagem %s", msg_id)
             self.conversation.fail(msg_id)
             await gateway.send_text(chat_id, ERROR_REPLY)
             return
@@ -197,7 +203,7 @@ class BotHandlers:
             try:
                 await gateway.send_file(chat_id, att)
             except Exception as exc:  # noqa: BLE001
-                print(f"[bot] erro ao reenviar {att.ref}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                log.warning("erro ao reenviar %s", att.ref, exc_info=True)
                 await gateway.send_text(chat_id, f"Não consegui reenviar o arquivo {att.filename}.")
 
     @staticmethod
@@ -218,14 +224,18 @@ class BotHandlers:
         if chat_id is None:
             return
         now = now or datetime.now().astimezone()
-        fresh = []
+        fresh, stale = [], 0
         for msg in self.conversation.unfinished():
             if now - datetime.fromisoformat(msg.at) > RECOVERY_MAX_AGE:
                 self.conversation.fail(msg.id)
+                stale += 1
             else:
                 fresh.append(msg)
+        if stale:
+            log.warning("%d mensagem(ns) sem resposta há mais de 24 h foram descartadas ao reiniciar", stale)
         if not fresh:
             return
+        log.warning("reinício com %d mensagem(ns) sem resposta; retomando", len(fresh))
         await gateway.send_text(chat_id, RECOVERY_NOTICE)
         for msg in fresh:
             async with gateway.typing(chat_id):
@@ -248,7 +258,7 @@ class BotHandlers:
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"[bot] erro: {context.error!r}", file=sys.stderr, flush=True)
+    log.error("erro no bot", exc_info=context.error if isinstance(context.error, BaseException) else None)
 
 
 async def notify_outcome(app: Application, outcome) -> None:
@@ -271,14 +281,14 @@ async def notify_outcome(app: Application, outcome) -> None:
     try:
         await app.bot_data["gateway"].send_text(allowed, text)
     except Exception as exc:  # noqa: BLE001 - falhar ao avisar não pode derrubar o bot
-        print(f"[bot] não consegui enviar o relatório: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        log.warning("não consegui enviar o relatório da curadoria ao usuário", exc_info=exc)
 
 
 async def _safe_recover(handlers: BotHandlers, gateway) -> None:
     try:
         await handlers.recover(gateway)
     except Exception as exc:  # noqa: BLE001
-        print(f"[bot] erro ao retomar mensagens pendentes: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        log.error("erro ao retomar mensagens pendentes", exc_info=exc)
 
 
 async def post_init(app: Application) -> None:
@@ -291,6 +301,11 @@ async def post_init(app: Application) -> None:
         app.bot_data["service"].watch(stop, WATCH_INTERVAL, on_outcome=lambda outcome: notify_outcome(app, outcome))
     )
     app.bot_data["recovery"] = asyncio.create_task(_safe_recover(app.bot_data["handlers"], gateway))
+    log.info("bot iniciado (modelo %s)", config.OPENROUTER_MODEL, extra={"channel": True})
+    log_handler, log_channel = app.bot_data.get("log_handler"), app.bot_data.get("log_channel_id")
+    if log_handler is not None and log_channel is not None:
+        shipper = LogShipper(log_handler, lambda text: gateway.send_text(log_channel, text, raw=True))
+        app.bot_data["log_shipper"] = asyncio.create_task(shipper.run(stop))
     allowed = app.bot_data.get("allowed_user_id")
     briefing = getattr(app.bot_data["handlers"], "briefing", None)
     if briefing is not None and allowed is not None:
@@ -305,6 +320,7 @@ async def post_shutdown(app: Application) -> None:
     stop, watcher = app.bot_data.get("stop"), app.bot_data.get("watcher")
     if stop is None or watcher is None:
         return
+    log.info("bot encerrando", extra={"channel": True})  # entra na fila antes do envio final
     stop.set()
     briefing = app.bot_data.get("briefing")
     if briefing is not None:
@@ -316,6 +332,12 @@ async def post_shutdown(app: Application) -> None:
         await asyncio.wait_for(watcher, timeout=SHUTDOWN_WAIT)  # deixa uma curadoria terminar
     except asyncio.TimeoutError:
         watcher.cancel()
+    shipper = app.bot_data.get("log_shipper")
+    if shipper is not None:
+        try:
+            await asyncio.wait_for(shipper, timeout=10)  # com `stop` ligado, envia o que sobrou e termina
+        except asyncio.TimeoutError:
+            shipper.cancel()
 
 
 def build_application(token: str, handlers: BotHandlers, service) -> Application:
@@ -335,13 +357,6 @@ def build_application(token: str, handlers: BotHandlers, service) -> Application
     app.add_handler(MessageHandler(filters.COMMAND, handlers.on_unknown))  # sempre por último
     app.add_error_handler(on_error)
     return app
-
-
-def configure_logging() -> None:
-    """O httpx loga a URL das requisições em INFO, e ela contém o token do bot."""
-    logging.basicConfig(level=logging.WARNING)
-    for name in ("httpx", "httpcore", "telegram"):
-        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def main(argv=None, agent=None, application_factory=build_application) -> int:
@@ -364,6 +379,11 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     except ValueError as exc:
         print(f"Erro: BRIEFING_TIME: {exc}", file=sys.stderr)
         return 1
+    try:
+        log_channel = parse_channel_id(config.LOG_CHANNEL_ID)
+    except ValueError as exc:
+        print(f"Erro: {exc}", file=sys.stderr)
+        return 1
     memory_store = MemoryStore(args.memory_dir or config.MEMORY_DIR)
     registry = AttachmentRegistry(memory_store)
     tasks = TaskStore(memory_store)  # lista de tarefas (todos/todo.md), gravada por código
@@ -377,17 +397,21 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
             print(f"Erro: {exc}", file=sys.stderr)
             return 1
 
-    configure_logging()
-    log = ConversationLog(args.log or config.CONVERSATION_FILE)
-    service = build_service(log, args.memory_dir, args.idle_seconds, channel="Telegram")
-    briefing = (BriefingScheduler(tasks, briefing_time.at, config.BRIEFING_STATE_FILE, log=log, tz=briefing_time.tz)
+    log_handler = configure_logging(config.LOG_LEVEL, config.LOG_CHANNEL_LEVEL, channel=log_channel is not None)
+    history = ConversationLog(args.log or config.CONVERSATION_FILE)
+    service = build_service(history, args.memory_dir, args.idle_seconds, channel="Telegram")
+    briefing = (BriefingScheduler(tasks, briefing_time.at, config.BRIEFING_STATE_FILE, log=history, tz=briefing_time.tz)
                 if briefing_time else None)
-    handlers = BotHandlers(Conversation(log, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID,
+    handlers = BotHandlers(Conversation(history, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID,
                            registry, verbose=args.verbose, briefing=briefing)
     app = application_factory(config.TELEGRAM_BOT_TOKEN, handlers, service)
+    app.bot_data["log_handler"] = log_handler  # o envio dos logs ao canal começa no post_init
+    app.bot_data["log_channel_id"] = log_channel
 
     print(f"Bot iniciado | modelo: {config.OPENROUTER_MODEL} | memória: {args.memory_dir or config.MEMORY_DIR}")
-    print(f"Histórico: {log.path} | Curador após {args.idle_seconds:.0f}s de inatividade")
+    print(f"Histórico: {history.path} | Curador após {args.idle_seconds:.0f}s de inatividade")
+    print(f"Canal de logs: {log_channel} ({config.LOG_CHANNEL_LEVEL.upper()}+)" if log_channel is not None
+          else "Canal de logs: desligado")
     print(f"Resumo da manhã: {briefing_time.describe()}" if briefing_time else "Resumo da manhã: desligado")
     if config.TELEGRAM_ALLOWED_USER_ID is None:
         print("ATENÇÃO: TELEGRAM_ALLOWED_USER_ID não definido. O bot recusará todos e imprimirá "

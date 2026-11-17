@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import applog
 import bot
 import chatflow
 import config
@@ -103,18 +105,18 @@ def test_other_users_groups_and_empty_text_are_ignored_and_not_persisted(env):
     assert env.log.messages() == [] and env.gw.events == [] and env.state.calls == []
 
 
-def test_without_allowed_id_refuses_everyone_and_prints_sender_id(env, capsys):
+def test_without_allowed_id_refuses_everyone_and_logs_sender_id(env, caplog):
     run(env.make_handlers(allowed=None).on_message(make_update(text="oi", user_id=777), env.ctx))
     assert env.log.messages() == [] and env.gw.events == []
-    assert "TELEGRAM_ALLOWED_USER_ID=777" in capsys.readouterr().out
+    assert "TELEGRAM_ALLOWED_USER_ID=777" in caplog.text
 
 
-def test_agent_error_replies_generically_and_marks_the_message_failed(env, capsys):
+def test_agent_error_replies_generically_and_marks_the_message_failed(env, caplog):
     env.state.fail = RuntimeError("segredo interno: api key abc")
     run(env.handlers.on_message(make_update(text="oi"), env.ctx))
     assert env.gw.sent() == [bot.ERROR_REPLY] and "abc" not in env.gw.sent()[0]
     assert stored(env).status == FAILED and env.log.unfinished() == []
-    assert "api key abc" in capsys.readouterr().err  # detalhe só no console
+    assert "api key abc" in caplog.text  # detalhe só no log local (o canal só recebe tipo e mensagem)
 
 
 def test_two_quick_messages_are_persisted_with_typing_first_then_answered_in_order(env):
@@ -208,14 +210,14 @@ def test_files_requested_by_the_agent_are_resent_after_the_text(env, capsys):
     assert f"[arquivo] reenviando {att.ref} (voucher.pdf)" in capsys.readouterr().out
 
 
-def test_resend_failure_is_reported_without_breaking_the_reply(env, capsys):
+def test_resend_failure_is_reported_without_breaking_the_reply(env, caplog):
     att = env.registry.add(file_id="F1", file_unique_id="u", kind="document", chat_id=ALLOWED, message_id=77,
                            filename="voucher.pdf", mime="application/pdf")
     env.state.send_files = [att]
     env.gw.send_file_error = RuntimeError("file_id inválido")
     run(env.handlers.on_message(make_update(text="me manda o voucher"), env.ctx))
     assert env.gw.sent() == ["ok", "Não consegui reenviar o arquivo voucher.pdf."]
-    assert "file_id inválido" in capsys.readouterr().err
+    assert "file_id inválido" in caplog.text
 
 
 # ---- arquivos: gravar na chegada, avisar, ler, responder ------------------------------
@@ -286,12 +288,12 @@ def test_unreadable_file_is_explained_and_marked_failed_but_the_attachment_is_ke
     assert len(env.registry.all()) == 1 and env.log.unfinished() == []
 
 
-def test_download_failure_is_generic_and_does_not_leak_details(env, capsys):
+def test_download_failure_is_generic_and_does_not_leak_details(env, caplog):
     env.gw.download_error = RuntimeError("token 123:abc inválido")
     run(env.handlers.on_file(make_update(document=pdf_doc()), env.ctx))
     assert env.gw.sent()[-1] == "Não consegui baixar o arquivo agora. Tente de novo em instantes."
     assert env.log.messages()[0].status == FAILED
-    assert "123:abc" in capsys.readouterr().err
+    assert "123:abc" in caplog.text
 
 
 def test_files_from_strangers_or_without_registry_are_ignored(env):
@@ -450,13 +452,13 @@ def test_shutdown_cancels_a_recovery_still_in_progress_and_survives_without_init
     run(bot.post_shutdown(make_app(env)))  # sem init: não quebra
 
 
-def test_recovery_errors_do_not_crash_the_bot(env, capsys):
+def test_recovery_errors_do_not_crash_the_bot(env, caplog):
     class Broken:
         async def recover(self, gateway):
             raise RuntimeError("falha ao retomar")
 
     run(bot._safe_recover(Broken(), env.gw))
-    assert "erro ao retomar mensagens pendentes" in capsys.readouterr().err
+    assert "erro ao retomar mensagens pendentes" in caplog.text
 
 
 def ok_outcome(report="Criei 1 documento.", messages=2):
@@ -493,13 +495,13 @@ def test_failure_is_notified_once_per_streak_and_success_resets_it():
     assert len(gw.texts) == 3
 
 
-def test_failure_to_send_the_report_does_not_raise(capsys):
+def test_failure_to_send_the_report_does_not_raise(caplog):
     class Down(FakeGateway):
         async def send_text(self, chat_id, text):
             raise RuntimeError("telegram fora")
 
     run(bot.notify_outcome(fake_app(Down()), ok_outcome()))
-    assert "não consegui enviar o relatório" in capsys.readouterr().err
+    assert "não consegui enviar o relatório" in caplog.text
 
 
 def test_watcher_callback_sends_the_report_through_the_gateway(env):
@@ -578,3 +580,25 @@ def test_main_gives_the_responder_the_send_attachment_tool(monkeypatch, tmp_path
     assert seen["names"][:4] == ["list_memory", "search_memory", "read_memory", "send_attachment"]
     assert seen["names"][4:] == ["list_tasks", "add_task", "complete_task", "reschedule_task",
                                  "reopen_task", "remove_task", "tag_task", "link_task"]
+
+
+@pytest.fixture
+def clean_logging():
+    yield
+    applog.configure_logging()  # sem canal; remove o handler do teste
+    logging.getLogger().handlers = [h for h in logging.getLogger().handlers if not getattr(h, "_limas_console", False)]
+
+
+def test_post_init_ships_lifecycle_lines_to_the_channel_and_shutdown_flushes(env, clean_logging):
+    handler = applog.configure_logging("INFO", "WARNING", channel=True)
+    app = make_app(env)
+    app.bot_data["log_handler"], app.bot_data["log_channel_id"] = handler, -100123
+
+    async def lifecycle():
+        await bot.post_init(app)
+        await asyncio.sleep(0.05)
+        await bot.post_shutdown(app)
+
+    asyncio.run(lifecycle())
+    sent = " ".join(t for cid, t in env.gw.texts if cid == -100123)
+    assert "bot iniciado" in sent and "bot encerrando" in sent

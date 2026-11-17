@@ -11,7 +11,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import config
-from curator.agent import ChatMessage, ToolEvent
+from curator.agent import ChatMessage, ToolEvent, Usage, aggregate_usage
 from curator.tools import build_read_tools
 from llm import get_llm
 from storage.store import MemoryStore
@@ -24,6 +24,7 @@ class ReplyResult:
     text: str
     trace: list[ToolEvent] = field(default_factory=list)
     files: list = field(default_factory=list)  # anexos a enviar junto com a resposta
+    usage: Usage = field(default_factory=Usage)
 
 
 def load_system_prompt() -> str:
@@ -79,4 +80,4 @@ def reply(history: list[ChatMessage], agent=None, now: datetime | None = None) -
     text = next(
         (m.text for m in reversed(out) if isinstance(m, AIMessage) and not m.tool_calls), ""
     )
-    return ReplyResult(text=text.strip(), trace=trace)
+    return ReplyResult(text=text.strip(), trace=trace, usage=aggregate_usage(out))

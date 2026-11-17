@@ -18,7 +18,7 @@ class FakeGateway:
         self.send_file_error = None
         self.registered = None
 
-    async def send_text(self, chat_id, text):
+    async def send_text(self, chat_id, text, *, raw=False):
         self.texts.append((chat_id, text))
         self.events.append(("text", text))
 

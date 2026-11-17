@@ -10,16 +10,18 @@ import asyncio
 import json
 import os
 import re
-import sys
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from applog import get_logger
 from conversation.log import ConversationLog
 from tasks.format import format_agenda
 from tasks.store import TaskStore
+
+log = get_logger("briefing")
 
 CATCHUP_UNTIL = time(12, 0)  # depois disso, um resumo perdido não é mais enviado
 RETRY_SECONDS = 300
@@ -155,13 +157,12 @@ class BriefingScheduler:
             try:
                 await send_text(text)
             except Exception as exc:  # noqa: BLE001 - tenta de novo depois
-                print(f"[resumo] não consegui enviar o resumo da manhã: {type(exc).__name__}: {exc}",
-                      file=sys.stderr, flush=True)
+                log.warning("não consegui enviar o resumo da manhã", exc_info=exc)
                 return False
             if self.log is not None:
                 message = self.log.append("assistente", text)
                 self.log.mark_curated([message.id])  # o Curator não precisa processar o resumo
-            print(f"[resumo] resumo da manhã enviado ({now:%Y-%m-%d %H:%M})", flush=True)
+            log.info("resumo da manhã enviado (%s)", f"{now:%Y-%m-%d %H:%M}")
         self._mark_sent(now.date())
         return True
 

@@ -48,7 +48,7 @@ def test_status_mentions_running_curation_only_while_it_runs(tmp_path):
     assert "curadoria em andamento" not in describe_status(service)
 
 
-def test_watch_awaits_async_callbacks_and_survives_callback_errors(tmp_path, capsys):
+def test_watch_awaits_async_callbacks_and_survives_callback_errors(tmp_path, caplog):
     service = make_service(tmp_path, lambda m, c, ch: CurateResult(report="ok"))
     events = []
 
@@ -64,4 +64,4 @@ def test_watch_awaits_async_callbacks_and_survives_callback_errors(tmp_path, cap
 
     asyncio.run(scenario())
     assert len(events) == 1  # o laço terminou normalmente apesar do erro no callback
-    assert "erro ao tratar o resultado" in capsys.readouterr().out
+    assert "erro ao tratar o resultado" in caplog.text

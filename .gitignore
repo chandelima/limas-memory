@@ -5,3 +5,4 @@ memory/
 *.log
 compare-*
 data/
+.claude/

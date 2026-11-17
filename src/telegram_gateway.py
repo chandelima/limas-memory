@@ -8,11 +8,14 @@ simples) ficam aqui, e os testes dos handlers usam um gateway falso.
 
 import asyncio
 import re
-import sys
 from contextlib import asynccontextmanager, suppress
 
 from telegram import BotCommandScopeChat, ReplyParameters
 from telegram.constants import ChatAction
+
+from applog import get_logger
+
+log = get_logger("telegram")
 
 TELEGRAM_LIMIT = 4096  # tamanho máximo de uma mensagem do Telegram
 TYPING_INTERVAL = 4  # o indicador "digitando..." dura ~5s
@@ -49,9 +52,10 @@ class TelegramGateway:
     def __init__(self, bot):
         self.bot = bot
 
-    async def send_text(self, chat_id: int, text: str) -> None:
-        """Envia texto simples, dividido no limite do Telegram."""
-        for chunk in split_message(to_plain(text)) or ["(sem resposta)"]:
+    async def send_text(self, chat_id: int | str, text: str, *, raw: bool = False) -> None:
+        """Envia texto simples, dividido no limite do Telegram. `raw=True` não mexe no texto
+        (usado nos logs, onde `**` ou `#` podem ser parte do conteúdo)."""
+        for chunk in split_message(text if raw else to_plain(text)) or ["(sem resposta)"]:
             await self.bot.send_message(chat_id=chat_id, text=chunk)
 
     async def send_file(self, chat_id: int, attachment) -> None:
@@ -92,5 +96,4 @@ class TelegramGateway:
         try:
             await self.bot.set_my_commands(commands, scope=scope)
         except Exception as exc:  # noqa: BLE001
-            print(f"[bot] não consegui registrar os comandos no Telegram: {type(exc).__name__}: {exc}",
-                  file=sys.stderr, flush=True)
+            log.warning("não consegui registrar os comandos no Telegram", exc_info=exc)
