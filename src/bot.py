@@ -35,7 +35,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 import config
 from attachments import reader
-from briefing import BriefingScheduler, parse_hhmm
+from briefing import BriefingScheduler, parse_briefing_time
 from attachments.registry import AttachmentRegistry
 from attachments.tools import build_attachment_tools
 from chatflow import Conversation, build_service, describe_outcome
@@ -360,7 +360,7 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
         print("Erro: defina TELEGRAM_BOT_TOKEN no ambiente ou no .env (token do @BotFather)", file=sys.stderr)
         return 1
     try:
-        briefing_at = parse_hhmm(config.BRIEFING_TIME)
+        briefing_time = parse_briefing_time(config.BRIEFING_TIME)
     except ValueError as exc:
         print(f"Erro: BRIEFING_TIME: {exc}", file=sys.stderr)
         return 1
@@ -380,15 +380,15 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     configure_logging()
     log = ConversationLog(args.log or config.CONVERSATION_FILE)
     service = build_service(log, args.memory_dir, args.idle_seconds, channel="Telegram")
-    briefing = (BriefingScheduler(tasks, briefing_at, config.BRIEFING_STATE_FILE, log=log)
-                if briefing_at else None)
+    briefing = (BriefingScheduler(tasks, briefing_time.at, config.BRIEFING_STATE_FILE, log=log, tz=briefing_time.tz)
+                if briefing_time else None)
     handlers = BotHandlers(Conversation(log, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID,
                            registry, verbose=args.verbose, briefing=briefing)
     app = application_factory(config.TELEGRAM_BOT_TOKEN, handlers, service)
 
     print(f"Bot iniciado | modelo: {config.OPENROUTER_MODEL} | memória: {args.memory_dir or config.MEMORY_DIR}")
     print(f"Histórico: {log.path} | Curador após {args.idle_seconds:.0f}s de inatividade")
-    print(f"Resumo da manhã: {briefing_at:%H:%M}" if briefing_at else "Resumo da manhã: desligado")
+    print(f"Resumo da manhã: {briefing_time.describe()}" if briefing_time else "Resumo da manhã: desligado")
     if config.TELEGRAM_ALLOWED_USER_ID is None:
         print("ATENÇÃO: TELEGRAM_ALLOWED_USER_ID não definido. O bot recusará todos e imprimirá "
               "o ID de quem escrever.")

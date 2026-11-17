@@ -9,10 +9,13 @@ como fala do assistente (já marcada como curada), para o agente saber o que foi
 import asyncio
 import json
 import os
+import re
 import sys
-from datetime import date, datetime, time, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Awaitable, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from conversation.log import ConversationLog
 from tasks.format import format_agenda
@@ -36,6 +39,51 @@ def parse_hhmm(value: str) -> time | None:
         raise ValueError(f"horário inválido: '{value}' (use HH:MM, por exemplo 06:00, ou 'off')") from None
 
 
+_OFFSET = re.compile(r"(?:utc|gmt)?\s*([+-])(\d{1,2})(?::?(\d{2}))?")
+
+
+def parse_timezone(value: str) -> tzinfo:
+    """Aceita nome IANA ('America/Recife'), 'UTC'/'Z' ou deslocamento ('-03:00', '-3', 'UTC-3')."""
+    raw = value.strip()
+    if raw.lower() in ("utc", "z", "gmt"):
+        return timezone.utc
+    if match := _OFFSET.fullmatch(raw.lower()):
+        sign = -1 if match.group(1) == "-" else 1
+        hours, minutes = int(match.group(2)), int(match.group(3) or 0)
+        if hours > 14 or minutes > 59:
+            raise ValueError(f"deslocamento de fuso inválido: '{raw}'")
+        return timezone(sign * timedelta(hours=hours, minutes=minutes))
+    try:
+        return ZoneInfo(raw)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        raise ValueError(
+            f"fuso desconhecido: '{raw}' (use um nome como America/Recife, UTC ou um deslocamento como -03:00)"
+        ) from None
+
+
+@dataclass(frozen=True)
+class BriefingTime:
+    at: time
+    tz: tzinfo | None = None  # None = fuso da máquina
+
+    def describe(self) -> str:
+        zone = getattr(self.tz, "key", None) or (str(self.tz) if self.tz is not None else "fuso da máquina")
+        return f"{self.at:%H:%M} ({zone})"
+
+
+def parse_briefing_time(value: str) -> BriefingTime | None:
+    """'06:00' (fuso da máquina), '06:00-03' (ISO 8601: horário + deslocamento do UTC, também
+    '06:00-03:00', '06:00+05:30', '06:00Z'), '06:00 America/Recife' (nome IANA, acompanha o
+    horário de verão), '06:00 UTC' ou '06:00 -03:00'. Vazio ou 'off' -> None (desligado)."""
+    value = (value or "").strip()
+    if not value or value.lower() in ("off", "desligado", "no", "nao", "não"):
+        return None
+    if compact := re.fullmatch(r"(\d{1,2}:\d{2})\s*(z|[+-]\d{1,2}(?::?\d{2})?)", value, re.IGNORECASE):
+        return BriefingTime(parse_hhmm(compact.group(1)), parse_timezone(compact.group(2)))
+    clock, _, zone = value.partition(" ")
+    return BriefingTime(parse_hhmm(clock), parse_timezone(zone) if zone.strip() else None)
+
+
 def build_briefing(tasks: TaskStore, today: date | None = None) -> str | None:
     """Texto do resumo, ou None se não há nada atrasado, de hoje, próximo ou sem data."""
     today = today or tasks.today()
@@ -51,12 +99,19 @@ class BriefingScheduler:
         state_path: Path,
         log: ConversationLog | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now().astimezone(),
+        tz: tzinfo | None = None,
     ):
         self.tasks = tasks
         self.at = at
         self.state_path = Path(state_path)
         self.log = log
         self.clock = clock
+        self.tz = tz  # fuso do horário do resumo; None = fuso da máquina
+
+    def _now(self) -> datetime:
+        """Agora, no fuso do resumo: dele vêm a data de 'hoje', a hora de enviar e o dia enviado."""
+        now = self.clock()
+        return now.astimezone(self.tz) if self.tz is not None else now
 
     # ---- estado: em que dia o resumo foi enviado pela última vez -------------
 
@@ -87,13 +142,14 @@ class BriefingScheduler:
         target = self._target(now.date(), now)
         if now >= target:
             target = self._target(now.date() + timedelta(days=1), now)
-        return (target - now).total_seconds()
+        # em UTC: a diferença real, mesmo se uma mudança de horário de verão cair no meio
+        return (target.astimezone(timezone.utc) - now.astimezone(timezone.utc)).total_seconds()
 
     # ---- envio -------------------------------------------------------------------
 
     async def send(self, send_text: Callable[[str], Awaitable[None]]) -> bool:
         """Monta e envia o resumo de hoje. True se resolvido (enviado ou nada a dizer)."""
-        now = self.clock()
+        now = self._now()
         text = build_briefing(self.tasks, now.date())
         if text is not None:
             try:
@@ -128,10 +184,10 @@ class BriefingScheduler:
 
     async def run(self, stop: asyncio.Event, send_text: Callable[[str], Awaitable[None]]) -> None:
         """Laço do resumo: recupera um resumo perdido ao iniciar e depois envia todo dia."""
-        if self.due_now(self.clock()) and await self._deliver(stop, send_text):
+        if self.due_now(self._now()) and await self._deliver(stop, send_text):
             return
         while not stop.is_set():
-            if await self._wait(stop, self.seconds_until_next(self.clock())):
+            if await self._wait(stop, self.seconds_until_next(self._now())):
                 return
             if await self._deliver(stop, send_text):
                 return
