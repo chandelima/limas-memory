@@ -1,0 +1,15 @@
+services:
+  bot:
+    build: .
+    image: limas-memory
+    restart: unless-stopped
+    env_file: .env            # chaves e tokens ficam no .env, fora da imagem
+    environment:
+      TZ: ${TZ:-America/Recife}   # define o "hoje" das tarefas; BRIEFING_TIME pode ter o próprio fuso
+      MEMORY_DIR: /memory         # os caminhos do container valem mais que os do .env
+      CONVERSATION_FILE: /data/conversa.json
+      BRIEFING_STATE_FILE: /data/briefing.json
+    volumes:
+      - ./memory:/memory          # repositório git da memória
+      - ./data:/data            # conversa.json e briefing.json
+    stop_grace_period: 40s        # deixa uma curadoria em andamento terminar (o bot espera até 30 s)

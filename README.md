@@ -1,0 +1,177 @@
+# limas-memory
+
+A personal memory assistant you talk to on Telegram. It answers using what it remembers about you and, in the
+background, turns what you tell it into structured, versioned Markdown notes.
+
+It is built from LangChain agents running on any model available through [OpenRouter](https://openrouter.ai).
+
+## How it works
+
+Two agents with strictly separated jobs:
+
+| Agent | Job | Memory access |
+|---|---|---|
+| **Responder** | Talks to you, reads the memory, manages your tasks | Read-only (plus the task and attachment tools) |
+| **Memory Curator** | Decides what has lasting value and writes it down | The **only** writer of `memory/` |
+
+```
+Telegram ──► bot ──► Responder ──► reads memory/ ──► reply (+ task buttons)
+               │
+               └─► conversation history ──(after N s of silence, or /curate)──► Curator ──► memory/ ──► git commit + push
+```
+
+- **Memory** is a plain folder of Markdown files (`memory/`) with an `index.md`, one small document per piece of
+  knowledge, English frontmatter (`description`, `origin_date`, `channel`) and relative links between related
+  documents. It is its own git repository: the Curator commits (and pushes) every change with a descriptive message.
+  `memory/` contains only Markdown; all code lives in `src/`.
+- **Curator** gets the recent messages and the existing documents, checks what is already stored, and then creates,
+  updates or ignores. It records contradictions with historical context, marks hypotheses as hypotheses, and never
+  summarizes away information.
+- **Everything is persisted on arrival.** Each message is written to the history before any processing, the typing
+  indicator starts immediately, and messages are answered one at a time, in order. After a crash, the bot resumes
+  unanswered messages from the last 24 hours.
+
+## Features
+
+- **Chat with memory**: ask about your trips, preferences, projects, people. The Responder consults the memory
+  before answering.
+- **Attachments**: send a PDF or an image (a trip voucher, a receipt). It is read by a model, the full content is
+  kept in the memory (by design: you decide what is stored), and the original file can be sent back on request.
+- **Tasks and reminders** (`todos/`): a central list plus one file per month, with tags (`#health`), recurrence
+  (daily, weekly, monthly), links to the related memory document, and an index. Completed tasks older than 30 days
+  are archived.
+- **Task buttons**: `/todo` (or any request to list tasks) shows a panel where each task is a button, `⭕`
+  pending / `🟢` done; tap to toggle. Multi-day panels prefix each task with `[Hoje 18:00]`, `[Amanhã 07:00]`,
+  `[31/01 15:00]` (the day names are in Portuguese).
+- **Lists** (shopping, movies, books…): loose items without a date are kept by the Curator in `listas/<name>.md`
+  rather than becoming tasks.
+- **Morning briefing**: every day at `BRIEFING_TIME` the bot sends overdue, today's and upcoming tasks (nothing if
+  there is nothing to say). If the bot was down at that time, it catches up until noon.
+- **Logging**: console logs plus an optional Telegram channel that receives warnings, errors, and start/stop
+  notices, and the Curator's reports for automatic runs. Secrets (bot token, API keys, git token) are masked in all
+  destinations, and logs never contain the text of your messages or of the memory.
+- **Memory backup**: after every curation the memory repository is committed and pushed to your private remote
+  (GitHub, Gitea…), including changes made outside the Curator (tasks, attachments).
+
+### Bot commands
+
+| Command | What it does |
+|---|---|
+| `/status` | Pending messages, curation state, last error |
+| `/curate` | Runs the Curator now on whatever is pending and replies with its report |
+| `/todo [hoje\|semana\|pendentes] [tag]` | Task panel with buttons: today and the next days (default), the next 7 days, or all pending; the optional tag filters |
+
+Only the user in `TELEGRAM_ALLOWED_USER_ID` is served, and only in a private chat.
+
+## Quick start
+
+Requirements: Python 3.12+, `git`, an OpenRouter API key, and a Telegram bot token from
+[@BotFather](https://t.me/BotFather).
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt      # Windows: .venv\Scripts\pip
+cp .env.example .env                            # then fill it in (see below)
+.venv/bin/python src/bot.py                     # Windows: .venv\Scripts\python
+```
+
+The first message from an unauthorized user makes the bot print their numeric ID: use it as
+`TELEGRAM_ALLOWED_USER_ID`. Adding the bot to a channel or group prints that chat's ID, which is what
+`LOG_CHANNEL_ID` needs.
+
+Useful flags: `--memory-dir`, `--log` (conversation file), `--idle-seconds`, `--verbose` (prints which memory
+documents each answer consulted).
+
+## Configuration
+
+All settings are environment variables (`.env` is loaded automatically). See `.env.example` for comments.
+
+**Required**
+
+| Variable | Purpose |
+|---|---|
+| `OPENROUTER_API_KEY` | OpenRouter key |
+| `TELEGRAM_BOT_TOKEN` | Bot token |
+| `TELEGRAM_ALLOWED_USER_ID` | Your numeric Telegram user ID |
+
+**Memory backup (recommended)**
+
+| Variable | Purpose |
+|---|---|
+| `MEMORY_GIT_REMOTE` | HTTPS URL of a **private** repository for the memory |
+| `MEMORY_GIT_TOKEN` | Access token with write access to that repository only (sent as an HTTP header, never stored in `.git/config`) |
+| `MEMORY_GIT_USER_NAME`, `MEMORY_GIT_USER_EMAIL` | Author of the Curator's commits |
+
+**Optional**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENROUTER_MODEL` | `openai/gpt-6-luna` | Model for both agents |
+| `DOCUMENT_MODEL` | `OPENROUTER_MODEL` | Model that reads PDFs and images |
+| `PDF_ENGINE` | automatic | OpenRouter PDF engine (`cloudflare-ai`, `mistral-ocr`, `native`) |
+| `CURATOR_IDLE_SECONDS` | `600` | Silence before the Curator runs automatically |
+| `BRIEFING_TIME` | `06:00` | `HH:MM`, optionally with a zone: `06:00-03`, `06:00 America/Recife`, or `off` |
+| `LOG_LEVEL` | `INFO` | Console level |
+| `LOG_CHANNEL_ID` | off | Telegram channel for logs (`-100…` or `@name`); the bot must be a channel **admin** that can post |
+| `LOG_CHANNEL_LEVEL` | `WARNING` | Minimum level sent to the channel |
+| `LOG_CHANNEL_HEADER` | empty | Text on top of each batch, for shared channels |
+| `MEMORY_DIR`, `CONVERSATION_FILE`, `BRIEFING_STATE_FILE` | `./memory`, `./data/conversa.json`, `./data/briefing.json` | Locations |
+
+## Docker
+
+```bash
+cp .env.example .env     # fill it in
+docker compose up -d --build
+docker compose logs -f
+```
+
+- The image contains only the code. Secrets stay in `.env`; state lives in two bind mounts: `./memory` (the memory
+  git repository) and `./data` (conversation history and briefing state).
+- `TZ` (default `America/Recife`, override it in the shell or a `.env` entry read by Compose) defines what "today"
+  means for tasks. `BRIEFING_TIME` may carry its own zone.
+- The container runs as a non-root user (uid 1000); make sure it can write to the two mounted folders.
+- On shutdown the bot waits up to 30 s for a running curation to finish.
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Layout:
+
+```
+src/
+  bot.py, telegram_gateway.py   Telegram handlers and the thin wrapper around the Telegram API
+  chatflow.py                   conversation flow: ingest → respond → curate → sync
+  responder/, curator/          the two agents (prompts in src/prompts/*.md)
+  storage/                      MemoryStore (path-confined, Markdown only), index, git
+  tasks/                        task store, tools, button panel
+  attachments/                  file reading, registry, resend tool
+  conversation/                 persisted conversation history
+  briefing.py, applog.py        morning briefing, logging layer
+evals/                          model comparison on scenarios (compare.py)
+tests/
+```
+
+Try the Curator on a sample conversation without touching your real memory:
+
+```bash
+python src/curate.py evals/scenarios/02_fato_novo.txt --memory-dir /tmp/memory-test --verbose
+```
+
+Compare models on the Curator scenarios (writes `compare-report.md` and `compare-results.json`; each run uses a
+fresh temporary memory and never pushes):
+
+```bash
+python evals/compare.py --models openai/gpt-6-luna,anthropic/claude-haiku-5.5 --runs 2
+```
+
+## Privacy notes
+
+- The memory can hold sensitive data (vouchers, reservation codes) because you asked it to keep everything. Use a
+  **private** remote.
+- `data/conversa.json` keeps the last 50 curated messages in plain text on disk (they give the Responder its
+  conversational context). It is git-ignored.
+- Prompts and the memory are sent to the model provider you configure on OpenRouter.
