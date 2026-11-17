@@ -1,23 +1,23 @@
-"""Modelo da lista de tarefas e o seu formato em Markdown (memory/todos/todo.md).
+"""Task list model and its Markdown format (memory/todos/todo.md).
 
-O arquivo é gerado e lido por código (nunca pelo Curator), então o formato é fixo:
+The file is generated and read by code (never by the Curator), so the format is fixed:
 
-    ## Pendentes
-    - [ ] 2026-11-18 08:00 — Consulta médica ^a1b2        (data e hora)
-    - [ ] 2026-11-20 — Ligar para o banco ^c3d4           (só data)
-    - [ ] Comprar presente ^e5f6                          (sem data)
+    ## Pending
+    - [ ] 2026-11-18 08:00 — Doctor appointment ^a1b2        (date and time)
+    - [ ] 2026-11-20 — Call the bank ^c3d4                    (date only)
+    - [ ] Buy a gift ^e5f6                                    (no date)
 
-    ## Recorrentes
-    - [ ] diária 08:00 — Tomar remédio ^g7h8
-    - [ ] semanal seg,qua 19:00 — Treino ^i9j0
-    - [ ] mensal 5 — Pagar aluguel ^k1l2
+    ## Recurring
+    - [ ] daily 08:00 — Take medication ^g7h8
+    - [ ] weekly mon,wed 19:00 — Workout ^i9j0
+    - [ ] monthly 5 — Pay rent ^k1l2
 
-    ## Concluídas
-    - [x] 2026-11-18 08:00 — Consulta médica (feita em 2026-11-18) ^a1b2
+    ## Done
+    - [x] 2026-11-18 08:00 — Doctor appointment (done on 2026-11-18) ^a1b2
 
-O sufixo `^xxxx` é o ID da tarefa (usado pelas tools). Uma tarefa recorrente é uma
-definição; cada vez que é cumprida vira uma linha em Concluídas com o mesmo ID.
-Linhas que o código não reconhece (edição manual) são preservadas na própria seção.
+The `^xxxx` suffix is the task ID (used by the tools). A recurring task is a definition;
+each time it is fulfilled it becomes a line under Done with the same ID.
+Lines the code does not recognize (manual edits) are preserved in their own section.
 """
 
 import calendar
@@ -29,57 +29,56 @@ import yaml
 
 from storage import markdown as md
 
-WEEKDAYS = ("seg", "ter", "qua", "qui", "sex", "sab", "dom")
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SEP = " — "
-MAX_DONE = 100  # histórico de concluídas mantido no arquivo
+MAX_DONE = 100  # history of completed tasks kept in the file
 MAX_TEXT = 200
-EMPTY = "_Nenhuma._"
+EMPTY = "_None._"
 
-SECTION_PENDING, SECTION_RECURRING, SECTION_DONE = "Pendentes", "Recorrentes", "Concluídas"
-_SECTION_NAMES = {"pendentes": SECTION_PENDING, "recorrentes": SECTION_RECURRING,
-                  "concluidas": SECTION_DONE, "concluídas": SECTION_DONE}
+SECTION_PENDING, SECTION_RECURRING, SECTION_DONE = "Pending", "Recurring", "Done"
+_SECTION_NAMES = {"pending": SECTION_PENDING, "recurring": SECTION_RECURRING, "done": SECTION_DONE}
 
 _ID = re.compile(r"\s\^([0-9a-f]{4})\s*$")
 _ITEM = re.compile(r"^- \[( |x)\] (.+)$")
 _DATE = r"\d{4}-\d{2}-\d{2}"
 _TIME = r"\d{2}:\d{2}"
 _PENDING = re.compile(rf"^(?:({_DATE})(?: ({_TIME}))?{re.escape(SEP)})?(.+)$")
-_RECURRING = re.compile(rf"^(diária|semanal [a-z,]+|mensal \d{{1,2}})(?: ({_TIME}))?{re.escape(SEP)}(.+)$")
-_DONE = re.compile(rf"^(?:({_DATE})(?: ({_TIME}))?|sem data){re.escape(SEP)}(.+) \(feita em ({_DATE})\)$")
+_RECURRING = re.compile(rf"^(daily|weekly [a-z,]+|monthly \d{{1,2}})(?: ({_TIME}))?{re.escape(SEP)}(.+)$")
+_DONE = re.compile(rf"^(?:({_DATE})(?: ({_TIME}))?|no date){re.escape(SEP)}(.+) \(done on ({_DATE})\)$")
 
 
 class TaskError(ValueError):
-    """Pedido inválido sobre tarefas; a mensagem é segura para mostrar ao agente."""
+    """Invalid request about tasks; the message is safe to show to the agent."""
 
 
-# ---- datas e horas -------------------------------------------------------------------
+# ---- dates and times -----------------------------------------------------------------
 
 
 def parse_date(value: str) -> date:
     try:
         return date.fromisoformat(value.strip())
     except ValueError:
-        raise TaskError(f"data inválida: '{value}' (use AAAA-MM-DD)") from None
+        raise TaskError(f"invalid date: '{value}' (use YYYY-MM-DD)") from None
 
 
 def parse_time(value: str) -> time:
     match = re.fullmatch(r"(\d{1,2}):(\d{2})", value.strip())
     if match and int(match.group(1)) < 24 and int(match.group(2)) < 60:
         return time(int(match.group(1)), int(match.group(2)))
-    raise TaskError(f"hora inválida: '{value}' (use HH:MM)")
+    raise TaskError(f"invalid time: '{value}' (use HH:MM)")
 
 
 def fmt_time(t: time | None) -> str:
     return t.strftime("%H:%M") if t else ""
 
 
-# ---- recorrência ---------------------------------------------------------------------
+# ---- recurrence ----------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Recurrence:
     kind: str  # "daily" | "weekly" | "monthly"
-    weekdays: tuple[int, ...] = ()  # 0 = segunda
+    weekdays: tuple[int, ...] = ()  # 0 = Monday
     month_day: int | None = None
 
     def occurs_on(self, d: date) -> bool:
@@ -88,37 +87,37 @@ class Recurrence:
         if self.kind == "weekly":
             return d.weekday() in self.weekdays
         last = calendar.monthrange(d.year, d.month)[1]
-        return d.day == min(self.month_day or 1, last)  # dia 31 vale no último dia do mês curto
+        return d.day == min(self.month_day or 1, last)  # day 31 falls on the last day of a short month
 
     def render(self) -> str:
         if self.kind == "daily":
-            return "diária"
+            return "daily"
         if self.kind == "weekly":
-            return "semanal " + ",".join(WEEKDAYS[i] for i in self.weekdays)
-        return f"mensal {self.month_day}"
+            return "weekly " + ",".join(WEEKDAYS[i] for i in self.weekdays)
+        return f"monthly {self.month_day}"
 
     @classmethod
     def parse(cls, text: str) -> "Recurrence":
-        raw = " ".join(text.lower().replace("ú", "u").replace("á", "a").split())
-        if raw in ("diaria", "todo dia", "todos os dias", "diario", "daily"):
+        raw = " ".join(text.lower().split())
+        if raw in ("daily", "every day", "everyday"):
             return cls("daily")
-        if raw in ("dias uteis", "dia util"):
+        if raw in ("weekdays", "workdays", "every weekday"):
             return cls("weekly", weekdays=(0, 1, 2, 3, 4))
-        if raw.startswith("semanal"):
-            names = [n for n in re.split(r"[\s,]+", raw.removeprefix("semanal").strip()) if n]
+        if raw.startswith("weekly"):
+            names = [n for n in re.split(r"[\s,]+", raw.removeprefix("weekly").strip()) if n]
             days = sorted({WEEKDAYS.index(n[:3]) for n in names if n[:3] in WEEKDAYS})
             if days and len(days) == len(set(n[:3] for n in names)):
                 return cls("weekly", weekdays=tuple(days))
-        if raw.startswith("mensal"):
-            day = raw.removeprefix("mensal").strip().removeprefix("dia").strip()
+        if raw.startswith("monthly"):
+            day = raw.removeprefix("monthly").strip().removeprefix("day").strip()
             if day.isdigit() and 1 <= int(day) <= 31:
                 return cls("monthly", month_day=int(day))
         raise TaskError(
-            f"recorrência inválida: '{text}' (use 'diária', 'semanal seg,qua' ou 'mensal 5')"
+            f"invalid recurrence: '{text}' (use 'daily', 'weekly mon,wed' or 'monthly 5')"
         )
 
 
-# ---- tarefas -------------------------------------------------------------------------
+# ---- tasks ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -129,7 +128,7 @@ class Task:
     due_time: time | None = None
     recurrence: Recurrence | None = None
     tags: tuple[str, ...] = ()
-    ref: str = ""  # documento da memória com os detalhes (ex.: viagens/petrolina-2027.md)
+    ref: str = ""  # memory document with the details (e.g. trips/petrolina-2027.md)
 
 
 @dataclass
@@ -148,33 +147,33 @@ class TaskList:
     pending: list[Task] = field(default_factory=list)
     recurring: list[Task] = field(default_factory=list)
     done: list[Completion] = field(default_factory=list)
-    extras: dict[str, list[str]] = field(default_factory=dict)  # linhas não reconhecidas
+    extras: dict[str, list[str]] = field(default_factory=dict)  # unrecognized lines
 
     def ids(self) -> set[str]:
         return {t.id for t in (*self.pending, *self.recurring)} | {c.id for c in self.done}
 
 
-# ---- etiquetas (#saúde) ----------------------------------------------------------------
+# ---- tags (#health) --------------------------------------------------------------------
 
-_TAG = re.compile(r"[^\W\d_][\w-]*")  # começa com letra: "#1" não é etiqueta
+_TAG = re.compile(r"[^\W\d_][\w-]*")  # starts with a letter: "#1" is not a tag
 _TRAILING_TAGS = re.compile(r"(?:^|\s+)#[^\W\d_][\w-]*(?:\s+#[^\W\d_][\w-]*)*\s*$")
 
 
 def normalize_tag(tag: str) -> str:
     value = tag.strip().lstrip("#").lower().replace(" ", "-")
     if not _TAG.fullmatch(value):
-        raise TaskError(f"etiqueta inválida: '{tag}' (letras, números e hífen; começa com letra)")
+        raise TaskError(f"invalid tag: '{tag}' (letters, digits and hyphen; starts with a letter)")
     return value
 
 
 def parse_tags(value) -> tuple[str, ...]:
-    """'saúde, casa' / '#saúde #casa' / ['saúde'] -> ('saúde', 'casa'); sem repetidas."""
+    """'health, home' / '#health #home' / ['health'] -> ('health', 'home'); no repeats."""
     items = re.split(r"[,\s]+", value) if isinstance(value, str) else list(value)
     return tuple(dict.fromkeys(normalize_tag(i) for i in items if str(i).strip()))
 
 
 def split_tags(text: str) -> tuple[str, tuple[str, ...]]:
-    """Separa as etiquetas escritas no FIM do texto: 'Consulta #saúde' -> ('Consulta', ('saúde',))."""
+    """Split the tags written at the END of the text: 'Checkup #health' -> ('Checkup', ('health',))."""
     match = _TRAILING_TAGS.search(text)
     if not match:
         return text, ()
@@ -185,43 +184,43 @@ def with_tags(text: str, tags: tuple[str, ...]) -> str:
     return text + "".join(f" #{t}" for t in tags)
 
 
-# ---- referência a um documento (link Markdown relativo) -----------------------------------
+# ---- reference to a document (relative Markdown link) ----------------------------------
 
 _REF_LINK = re.compile(r"\s\[[^\]]*\]\(\.\./([^)\s]+\.md)\)\s*$")
 _REF_PATH = re.compile(r"[\w./-]+\.md", re.UNICODE)
 
 
 def normalize_ref(ref: str) -> str:
-    """'viagens/petrolina-2027.md' (relativo à raiz da memória); '' = sem referência."""
+    """'trips/petrolina-2027.md' (relative to the memory root); '' = no reference."""
     ref = ref.strip().lstrip("/")
     if not ref:
         return ""
     if ".." in ref.split("/") or not _REF_PATH.fullmatch(ref):
-        raise TaskError(f"referência inválida: '{ref}' (use o caminho de um documento, ex.: viagens/x.md)")
+        raise TaskError(f"invalid reference: '{ref}' (use a document path, e.g. trips/x.md)")
     return ref
 
 
 def split_ref(content: str) -> tuple[str, str]:
-    """Separa o link '[detalhes](../viagens/x.md)' do fim da linha."""
+    """Split the '[details](../trips/x.md)' link off the end of the line."""
     match = _REF_LINK.search(content)
     return (content[: match.start()].rstrip(), match.group(1)) if match else (content, "")
 
 
 def with_ref(content: str, ref: str) -> str:
-    return f"{content} [detalhes](../{ref})" if ref else content
+    return f"{content} [details](../{ref})" if ref else content
 
 
 def clean_text(text: str) -> str:
-    """Uma linha só, sem o '^' que marcaria um ID; vazio ou longo demais é erro."""
+    """A single line, without the '^' that would mark an ID; empty or too long is an error."""
     text = " ".join(text.replace("^", "").split())
     if not text:
-        raise TaskError("a tarefa precisa de um texto")
+        raise TaskError("the task needs a text")
     if len(text) > MAX_TEXT:
-        raise TaskError(f"texto longo demais (máximo {MAX_TEXT} caracteres)")
+        raise TaskError(f"text too long (maximum {MAX_TEXT} characters)")
     return text
 
 
-# ---- Markdown -> modelo --------------------------------------------------------------
+# ---- Markdown -> model -----------------------------------------------------------------
 
 
 def _parse_when(d: str | None, t: str | None) -> tuple[date | None, time | None]:
@@ -269,7 +268,7 @@ def parse(text: str) -> TaskList:
     return tl
 
 
-# ---- modelo -> Markdown --------------------------------------------------------------
+# ---- model -> Markdown -----------------------------------------------------------------
 
 
 def _when(d: date | None, t: time | None) -> str:
@@ -287,8 +286,8 @@ def _recurring_line(t: Task) -> str:
 
 
 def _done_line(c: Completion) -> str:
-    body = f"{with_tags(c.text, c.tags)} (feita em {c.done_on.isoformat()})"
-    return f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{with_ref(body, c.ref)} ^{c.id}"
+    body = f"{with_tags(c.text, c.tags)} (done on {c.done_on.isoformat()})"
+    return f"- [x] {_when(c.due_date, c.due_time) or 'no date'}{SEP}{with_ref(body, c.ref)} ^{c.id}"
 
 
 def _front(description: str) -> str:
@@ -297,8 +296,8 @@ def _front(description: str) -> str:
 
 
 def render(tl: TaskList) -> str:
-    """Arquivo central (todos/todo.md): pendentes sem data, recorrentes e concluídas recentes.
-    As pendentes COM data ficam em arquivos mensais (render_month); quem chama as separa."""
+    """Central file (todos/todo.md): undated pending tasks, recurring ones and recent completions.
+    Pending tasks WITH a date live in monthly files (render_month); callers split them."""
     pending = sorted(tl.pending, key=lambda x: (x.due_date or date.max, x.due_time or time.min))
     recurring = sorted(tl.recurring, key=lambda x: x.due_time or time.min)
     done = sorted(tl.done, key=lambda c: c.done_on, reverse=True)[:MAX_DONE]
@@ -307,7 +306,7 @@ def render(tl: TaskList) -> str:
         (SECTION_RECURRING, [_recurring_line(t) for t in recurring]),
         (SECTION_DONE, [_done_line(c) for c in done]),
     )
-    out = [_front("Lista de tarefas gerenciada pelo bot: sem data, recorrentes e concluídas recentes."), "# Tarefas", ""]
+    out = [_front("Task list managed by the bot: undated, recurring and recently completed tasks."), "# Tasks", ""]
     for name, lines in sections:
         out += [f"## {name}", ""]
         out += [*lines, *tl.extras.get(name, [])] or [EMPTY]
@@ -316,11 +315,11 @@ def render(tl: TaskList) -> str:
 
 
 def render_month(tasks: list[Task], month: str, extras: list[str] | None = None) -> str:
-    """Pendentes com vencimento em `month` (todos/AAAA-MM.md), só com a seção Pendentes."""
+    """Pending tasks due in `month` (todos/YYYY-MM.md), with only the Pending section."""
     lines = [_pending_line(t) for t in sorted(tasks, key=lambda x: (x.due_date or date.max, x.due_time or time.min))]
     lines += list(extras or [])
-    return "\n".join([_front(f"Tarefas pendentes com vencimento em {month}."),
-                      f"# Tarefas com vencimento em {month}", "", f"## {SECTION_PENDING}", "",
+    return "\n".join([_front(f"Pending tasks due in {month}."),
+                      f"# Tasks due in {month}", "", f"## {SECTION_PENDING}", "",
                       *(lines or [EMPTY]), ""])
 
 
@@ -329,28 +328,28 @@ def _n(count: int, singular: str, plural: str) -> str:
 
 
 def render_index(central: TaskList, months: dict[str, int], archives: dict[str, int], current_month: str) -> str:
-    """Índice da pasta todos/: o arquivo central, os meses de pendentes (futuros e já
-    vencidos) e o arquivo mensal das concluídas. Gerado por código a cada alteração."""
-    out = [_front("Índice das tarefas: lista central, pendentes por mês e arquivo de concluídas."),
-           "# Índice das tarefas", "", "Gerado automaticamente a cada alteração; não edite à mão.", "",
-           "## Lista central", "",
-           "- [Sem data, recorrentes e concluídas recentes](todo.md) — "
-           + ", ".join([_n(len(central.pending), "tarefa sem data", "tarefas sem data"),
-                        _n(len(central.recurring), "recorrente", "recorrentes"),
-                        _n(len(central.done), "concluída recente", "concluídas recentes")]), "",
-           "## Pendentes por mês", ""]
+    """Index of the todos/ folder: the central file, the months of pending tasks (future and
+    already overdue) and the monthly archive of completed ones. Generated by code on every change."""
+    out = [_front("Task index: central list, pending tasks by month and archive of completed ones."),
+           "# Task index", "", "Generated automatically on every change; do not edit by hand.", "",
+           "## Central list", "",
+           "- [Undated, recurring and recently completed](todo.md) — "
+           + ", ".join([_n(len(central.pending), "undated task", "undated tasks"),
+                        _n(len(central.recurring), "recurring", "recurring"),
+                        _n(len(central.done), "recently completed", "recently completed")]), "",
+           "## Pending by month", ""]
     if months:
         for month in sorted(months):
             note = ""
             if months[month] and month < current_month:
-                note = " (vencimento já passou)"
-            label = _n(months[month], "pendente", "pendentes") if months[month] else "sem pendentes"
+                note = " (due date has passed)"
+            label = _n(months[month], "pending", "pending") if months[month] else "none pending"
             out.append(f"- [{month}]({month}.md) — {label}{note}")
     else:
         out.append(EMPTY)
-    out += ["", "## Concluídas (arquivo mensal)", ""]
+    out += ["", "## Completed (monthly archive)", ""]
     if archives:
-        out += [f"- [{month}](arquivo/{month}.md) — {_n(archives[month], 'concluída', 'concluídas')}"
+        out += [f"- [{month}](archive/{month}.md) — {_n(archives[month], 'completed', 'completed')}"
                 for month in sorted(archives, reverse=True)]
     else:
         out.append(EMPTY)
@@ -358,7 +357,7 @@ def render_index(central: TaskList, months: dict[str, int], archives: dict[str, 
 
 
 def render_archive(done: list[Completion], month: str) -> str:
-    """Arquivo mensal de concluídas (todos/arquivo/AAAA-MM.md), só com a seção Concluídas."""
+    """Monthly archive of completed tasks (todos/archive/YYYY-MM.md), with only the Done section."""
     lines = [_done_line(c) for c in sorted(done, key=lambda c: c.done_on, reverse=True)]
-    return "\n".join([_front(f"Arquivo de tarefas concluídas em {month}."),
-                      f"# Tarefas concluídas em {month}", "", f"## {SECTION_DONE}", "", *lines, ""])
+    return "\n".join([_front(f"Archive of tasks completed in {month}."),
+                      f"# Tasks completed in {month}", "", f"## {SECTION_DONE}", "", *lines, ""])
