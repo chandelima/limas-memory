@@ -581,7 +581,7 @@ def test_main_gives_the_chat_agent_the_send_attachment_tool(monkeypatch, tmp_pat
     assert code == 0
     assert seen["names"][:4] == ["list_memory", "search_memory", "read_memory", "send_attachment"]
     assert seen["names"][4:] == ["list_tasks", "add_task", "complete_task", "reschedule_task",
-                                 "reopen_task", "remove_task", "tag_task", "link_task"]
+                                 "reopen_task", "remove_task", "tag_task", "link_task", "web_search"]
 
 
 @pytest.fixture

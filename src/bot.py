@@ -50,6 +50,7 @@ from tasks import panel
 from tasks.model import TaskError
 from tasks.store import TaskStore
 from tasks.tools import build_task_tools
+from web_search import build_web_search_tool
 from telegram_gateway import TELEGRAM_LIMIT, TYPING_INTERVAL, TelegramGateway, split_message, to_plain  # noqa: F401
 
 log = get_logger("bot")
@@ -523,7 +524,8 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     if agent is None:
         try:
             tools = (default_read_tools(args.memory_dir) + build_attachment_tools(registry, outbox)
-                     + build_task_tools(tasks))
+                     + build_task_tools(tasks)
+                     + ([build_web_search_tool()] if config.WEB_SEARCH else []))
             agent = build_chat_agent(tools=tools)
         except RuntimeError as exc:
             print(f"Error: {exc}", file=sys.stderr)

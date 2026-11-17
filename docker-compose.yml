@@ -28,6 +28,11 @@ services:
       LOG_CHANNEL_ID: ${LOG_CHANNEL_ID:-}
       LOG_CHANNEL_LEVEL: ${LOG_CHANNEL_LEVEL:-WARNING}
       LOG_CHANNEL_HEADER: ${LOG_CHANNEL_HEADER:-}
+      WEB_SEARCH: ${WEB_SEARCH:-on}
+      WEB_SEARCH_ENGINE: ${WEB_SEARCH_ENGINE:-parallel}
+      WEB_SEARCH_MODE: ${WEB_SEARCH_MODE:-turbo}
+      WEB_SEARCH_MAX_RESULTS: ${WEB_SEARCH_MAX_RESULTS:-3}
+      WEB_SEARCH_MODEL: ${WEB_SEARCH_MODEL:-}
       # container paths (they win over anything from outside)
       MEMORY_DIR: /memory
       CONVERSATION_FILE: /data/conversation.json

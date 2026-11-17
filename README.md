@@ -40,6 +40,11 @@ Telegram ──► bot ──► Chat Agent ──► reads memory/ ──► re
 - **Tasks and reminders** (`todos/`): a central list plus one file per month, with tags (`#health`), recurrence
   (daily, weekly, monthly), links to the related memory document, and an index. Completed tasks older than 30 days
   are archived.
+- **Web search**: the chat agent has a `web_search` tool and uses it only when the question needs current or external
+  information (news, prices, exchange rates, weather). It runs OpenRouter's `web` plugin with the Parallel engine, the
+  cheapest one (about US$ 0.001 per search in `turbo` mode, plus the model tokens), in a separate short call, so the
+  normal conversation never pays for a search. Results come with source links and are treated as untrusted text
+  (never as instructions). `WEB_SEARCH=off` removes the tool.
 - **Task buttons**: `/todo` (or any request to list tasks) shows a panel where each task is a button, `⭕`
   pending / `🟢` done; tapping one opens its card (full text, when, tags, linked document) with buttons to
   check/uncheck it and to go back to the list, so long tasks are never cut off. Multi-day panels prefix each task with `[Today 18:00]`, `[Tomorrow 07:00]`,
@@ -121,6 +126,7 @@ All settings are environment variables (`.env` is loaded automatically). See `.e
 | `LOG_CHANNEL_ID` | off | Telegram channel for logs (`-100…` or `@name`); the bot must be a channel **admin** that can post |
 | `LOG_CHANNEL_LEVEL` | `WARNING` | Minimum level sent to the channel |
 | `LOG_CHANNEL_HEADER` | empty | Text on top of each batch, for shared channels |
+| `WEB_SEARCH`, `WEB_SEARCH_ENGINE`, `WEB_SEARCH_MODE`, `WEB_SEARCH_MAX_RESULTS`, `WEB_SEARCH_MODEL` | `on`, `parallel`, `turbo`, `3`, `OPENROUTER_MODEL` | Web search tool |
 | `MEMORY_DIR`, `CONVERSATION_FILE`, `BRIEFING_STATE_FILE`, `LANGUAGE_FILE` | `./memory`, `./data/conversation.json`, `./data/briefing.json`, `./data/language.json` | Locations |
 
 ## Docker

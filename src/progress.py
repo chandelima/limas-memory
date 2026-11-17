@@ -46,6 +46,7 @@ _LABELS = {
     "search_memory": ("progress_memory_search", "query"),
     "read_memory": ("progress_memory_read", "path"),
     "send_attachment": ("progress_file", None),
+    "web_search": ("progress_web_search", "query"),
     "list_tasks": ("progress_tasks_list", None),
     "add_task": ("progress_tasks_add", None),
     "complete_task": ("progress_tasks_update", None),

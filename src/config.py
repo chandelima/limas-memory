@@ -40,6 +40,13 @@ TELEGRAM_ALLOWED_USER_ID = int(_allowed) if _allowed.isdigit() else None
 # Attachments (vouchers, photos): model that reads documents and OpenRouter PDF engine
 # (the file registry lives in MEMORY_DIR/attachments/, as Markdown)
 DOCUMENT_MODEL = os.getenv("DOCUMENT_MODEL", "")  # empty = uses OPENROUTER_MODEL
+# Web search tool of the chat agent (OpenRouter `web` plugin; Parallel is the cheapest engine)
+WEB_SEARCH = os.getenv("WEB_SEARCH", "on").strip().lower() not in ("off", "0", "false", "no", "")
+WEB_SEARCH_ENGINE = os.getenv("WEB_SEARCH_ENGINE", "parallel")
+WEB_SEARCH_MODE = os.getenv("WEB_SEARCH_MODE", "turbo")  # Parallel: turbo/fast (US$ 0.001), basic/advanced (US$ 0.005)
+WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "3") or 3)
+WEB_SEARCH_MODEL = os.getenv("WEB_SEARCH_MODEL", "")  # empty = OPENROUTER_MODEL
+
 PDF_ENGINE = os.getenv("PDF_ENGINE", "")  # empty = OpenRouter chooses; or cloudflare-ai, mistral-ocr, native
 
 # Morning briefing on Telegram: "HH:MM" (machine time zone), "HH:MM-03" (ISO 8601: time glued to

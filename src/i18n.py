@@ -56,6 +56,7 @@ CATALOG: dict[str, str] = {
     "progress_memory_search": "🔎 Searching the memory for “{query}”…",
     "progress_memory_read": "📖 Reading {path}…",
     "progress_file": "📎 Getting the file…",
+    "progress_web_search": "🌐 Searching the web for “{query}”…",
     "progress_tasks_list": "📋 Checking your tasks…",
     "progress_tasks_add": "➕ Adding the task…",
     "progress_tasks_update": "✏️ Updating your tasks…",
