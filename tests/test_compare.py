@@ -139,10 +139,13 @@ def test_tool_errors_are_counted(scenarios_dir, tmp_path):
             return build_curator(llm=ScriptedModel(responses=script), tools=tools)
         return good_factory(model, tools, scenario)
 
-    _, results, _ = run_main(scenarios_dir, tmp_path, "fake/a", with_error, runs=1)
+    _, results, report = run_main(scenarios_dir, tmp_path, "fake/a", with_error, runs=1)
     r01 = next(r for r in results if r["scenario"].startswith("01"))
     assert r01["tool_calls"] == 1 and r01["tool_errors"] == 1
     assert r01["checks"]["sem_erro_de_tool"] is False
+    assert r01["tool_error_messages"][0].startswith("write_memory(")
+    assert "description" in r01["tool_error_messages"][0]
+    assert "Erros de tool" in report and "01_irrelevante: write_memory(" in report
 
 
 def test_model_error_is_recorded_and_run_continues(scenarios_dir, tmp_path):

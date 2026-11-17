@@ -52,6 +52,7 @@ class ScenarioRun:
     seconds: float = 0.0
     tool_calls: int = 0
     tool_errors: int = 0
+    tool_error_messages: list[str] = field(default_factory=list)  # "tool(args): ERRO..."
     committed: bool = False
     usage: Usage = field(default_factory=Usage)
     checks: dict[str, bool] = field(default_factory=dict)
@@ -144,6 +145,10 @@ def _default_factory(model: str, tools: list, scenario: str):
     return build_curator(model=model, tools=tools)
 
 
+def _short_args(args: dict, limit: int = 80) -> str:
+    return ", ".join(f"{k}={str(v)[:limit]!r}" for k, v in args.items())
+
+
 def run_model(model, run_idx, scenarios, base_dir, channel, factory, now) -> list[ScenarioRun]:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", model)
     mem = base_dir / f"{safe}-run{run_idx}"
@@ -161,7 +166,11 @@ def run_model(model, run_idx, scenarios, base_dir, channel, factory, now) -> lis
             result = curate(messages, agent=agent, channel=channel, now=now)
             run.usage = result.usage
             run.tool_calls = len(result.trace)
-            run.tool_errors = sum(1 for e in result.trace if e.result.startswith("ERRO"))
+            failed = [e for e in result.trace if e.result.startswith("ERRO")]
+            run.tool_errors = len(failed)
+            run.tool_error_messages = [
+                f"{e.name}({_short_args(e.args)}): {e.result.strip()[:300]}" for e in failed
+            ]
         except Exception as exc:  # noqa: BLE001 - qualquer falha vira dado do relatório
             run.error = f"{type(exc).__name__}: {str(exc)[:300]}"
         run.seconds = time.perf_counter() - started
@@ -273,7 +282,12 @@ def render_report(results: list[ScenarioRun], meta: dict) -> str:
 
     failures = [f"- {r.model} #{r.run} {r.scenario}: {c}" for r in results for c, ok in r.checks.items() if not ok]
     errors = [f"- {r.model} #{r.run} {r.scenario}: {r.error}" for r in results if r.error]
+    tool_errs = [
+        f"- {r.model} #{r.run} {r.scenario}: {m}" for r in results for m in r.tool_error_messages
+    ]
     out += ["## Falhas", ""] + (failures or ["Nenhuma checagem falhou."])
+    if tool_errs:
+        out += ["", "## Erros de tool (o agente recebeu e pôde se corrigir)", ""] + tool_errs
     if errors:
         out += ["", "## Execuções com erro", ""] + errors
     unreported = sum(r.usage.unreported_calls for r in results)
