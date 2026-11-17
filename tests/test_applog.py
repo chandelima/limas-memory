@@ -143,7 +143,7 @@ def test_handler_queues_warnings_but_not_info_unless_marked_for_the_channel():
     while not handler.queue.empty():
         lines.append(handler.queue.get_nowait())
     assert [ln.split(": ", 1)[1] for ln in lines] == ["aviso", "erro", "bot iniciado"]
-    assert lines[0].split()[1] == "WARNING" and " bot: " in lines[0]  # hora, nível e origem sem o prefixo limas.
+    assert lines[0].split()[1] == "#WARNING" and " bot: " in lines[0]  # hora, nível e origem sem o prefixo limas.
 
 
 def test_channel_line_has_error_type_and_message_but_no_traceback_and_a_single_line(secrets):

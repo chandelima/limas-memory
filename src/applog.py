@@ -115,7 +115,7 @@ class ChannelHandler(logging.Handler):
     @staticmethod
     def channel_line(record: logging.LogRecord) -> str:
         stamp = time.strftime("%H:%M:%S", time.localtime(record.created))
-        text = f"{stamp} {record.levelname} {record.name.removeprefix(ROOT_NAME + '.')}: {record.getMessage()}"
+        text = f"{stamp} #{record.levelname} {record.name.removeprefix(ROOT_NAME + '.')}: {record.getMessage()}"
         if record.exc_info and record.exc_info[1] is not None:
             err = record.exc_info[1]
             text += f" [{type(err).__name__}: {err}]"  # só tipo e mensagem; o traceback fica no console
