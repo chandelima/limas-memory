@@ -25,7 +25,7 @@ def test_panel_shows_unchecked_and_checked_buttons_with_callback_data(tasks):
     tasks.complete(b.id)
     text, rows = panel.build_panel(tasks)
     assert "marcar ou desmarcar" in text
-    assert labels(rows) == ["🔲 08:00 Consulta médica", "✅ Ligar para o banco"]
+    assert labels(rows) == ["⭕ 08:00 Consulta médica", "🟢 Ligar para o banco"]
     assert panel.decode(rows[0][0][1]) == (a.id, TODAY, "hoje", "")
     assert all(len(data.encode()) <= 64 for _, data in sum(rows, []))
 
@@ -36,9 +36,9 @@ def test_overdue_upcoming_and_undated_appear_with_their_dates(tasks):
     tasks.add("Sem data")
     tasks.add("Longe", date(2026, 12, 25))  # fora do horizonte de "hoje"
     _, rows = panel.build_panel(tasks)
-    assert labels(rows) == ["🔲 10/11 Atrasada", "🔲 19/11 09:30 Amanhã", "🔲 Sem data"]
+    assert labels(rows) == ["⭕ 10/11 Atrasada", "⭕ 19/11 09:30 Amanhã", "⭕ Sem data"]
     _, pend = panel.build_panel(tasks, "pendentes")
-    assert "🔲 25/12 Longe" in labels(pend)
+    assert "⭕ 25/12 Longe" in labels(pend)
 
 
 def test_toggle_flips_the_current_state_both_ways(tasks):
@@ -53,9 +53,9 @@ def test_recurring_task_toggles_only_todays_occurrence(tasks):
     r = tasks.add("Remédio", recurrence=Recurrence.parse("diária"), due_time=time(8, 0))
     assert panel.toggle(tasks, r.id, TODAY)[1] is True
     _, rows = panel.build_panel(tasks)
-    assert labels(rows) == ["✅ 08:00 Remédio"]
+    assert labels(rows) == ["🟢 08:00 Remédio"]
     assert panel.toggle(tasks, r.id, TODAY)[1] is False
-    assert labels(panel.build_panel(tasks)[1]) == ["🔲 08:00 Remédio"]
+    assert labels(panel.build_panel(tasks)[1]) == ["⭕ 08:00 Remédio"]
 
 
 def test_toggle_unknown_task_raises_task_error(tasks):
