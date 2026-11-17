@@ -40,6 +40,18 @@ def describe_args(args: dict) -> str:
     return ", ".join(parts)
 
 
+def describe_usage(u) -> str:
+    text = (
+        f"chamadas ao modelo: {u.llm_calls} | entrada: {u.input_tokens} | saída: {u.output_tokens} | "
+        f"cache (leitura): {u.cache_read} | cache (criação): {u.cache_creation} | "
+        f"raciocínio: {u.reasoning} | total: {u.total_tokens}"
+    )
+    text += f" | custo: US$ {u.cost:.6f}" if u.cost_reported else " | custo: n/d"
+    if u.unreported_calls:
+        text += f" | ATENÇÃO: {u.unreported_calls} chamada(s) sem dados de uso"
+    return text
+
+
 def parse_conversation(text: str) -> list[ChatMessage]:
     messages: list[ChatMessage] = []
     current: ChatMessage | None = None
@@ -101,6 +113,8 @@ def main(argv: list[str] | None = None, agent=None) -> int:
             print(f"   -> {shown}")
     print("\n== Relatório do Curator ==")
     print(result.report or "(sem relatório)")
+    print("\n== Uso de tokens ==")
+    print(describe_usage(result.usage))
 
     after = git.head()
     print("\n== Mudanças na memória ==")

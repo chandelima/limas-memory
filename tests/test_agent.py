@@ -135,7 +135,7 @@ def test_curator_uses_temperature_zero(monkeypatch):
 
     monkeypatch.setattr(agent_mod, "get_llm", fake_get_llm)
     build_curator(tools=[])
-    assert seen == {"temperature": 0}
+    assert seen == {"model": None, "temperature": 0}
 
 
 def test_trace_pairs_each_call_with_its_result(mem):

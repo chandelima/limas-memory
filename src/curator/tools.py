@@ -125,15 +125,24 @@ def build_tools(store: MemoryStore, git: MemoryGit) -> list[BaseTool]:
     return [*build_read_tools(store), write_memory, update_index, commit_memory]
 
 
-def make_store_and_git(memory_dir: Path | None = None) -> tuple[MemoryStore, MemoryGit]:
-    """Store e git da pasta indicada (padrão: MEMORY_DIR), com credenciais por env."""
+def make_store_and_git(
+    memory_dir: Path | None = None, push: bool | None = None
+) -> tuple[MemoryStore, MemoryGit]:
+    """Store e git da pasta indicada (padrão: MEMORY_DIR), com identidade por env.
+
+    `push` controla remote e token: por padrão só a memória REAL (sem `memory_dir`)
+    os recebe. Uma pasta indicada explicitamente (teste, comparação) nunca faz
+    push, para não enviar dados de teste ao GitHub da memória.
+    """
     root = Path(memory_dir) if memory_dir else config.MEMORY_DIR
+    if push is None:
+        push = memory_dir is None
     git = MemoryGit(
         root,
-        remote=config.MEMORY_GIT_REMOTE,
+        remote=config.MEMORY_GIT_REMOTE if push else "",
         user_name=config.MEMORY_GIT_USER_NAME,
         user_email=config.MEMORY_GIT_USER_EMAIL,
-        token=config.MEMORY_GIT_TOKEN,
+        token=config.MEMORY_GIT_TOKEN if push else "",
     )
     return MemoryStore(root), git
 
