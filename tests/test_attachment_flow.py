@@ -245,22 +245,22 @@ def test_conversation_logs_attachment_ids_and_clears_stale_outbox(tmp_path, regi
     assert result.files == [] and log.messages()[0].attachments == [att.id]
 
 
-def msg(i, attachments=None, text=None):
+def msg(i, attachments=None, text=None, curated=False):
     return Message(id=i, role="usuario", text=text or f"[Arquivo enviado: v{i}.pdf (anexo:a{i})]\nconteúdo {i}",
-                   at="2026-11-17T10:00:00-03:00", attachments=attachments or [])
+                   at="2026-11-17T10:00:00-03:00", attachments=attachments or [], curated=curated)
 
 
 def test_compact_history_only_shrinks_curated_attachments_never_the_last_or_pending():
-    messages = [msg(1, ["a1"]), msg(2, ["a2"]), msg(3, ["a3"]), msg(4, text="oi")]
-    out = compact_history(messages, curated_upto=2)
+    messages = [msg(1, ["a1"], curated=True), msg(2, ["a2"], curated=True), msg(3, ["a3"]), msg(4, text="oi")]
+    out = compact_history(messages)
     assert "conteúdo omitido" in out[0].text and out[0].text.startswith("[Arquivo enviado: v1.pdf (anexo:a1)]")
     assert "conteúdo 1" not in out[0].text
     assert "conteúdo 2" not in out[1].text  # curada: encurtada
     assert out[2].text == messages[2].text  # pendente: completa (o Curator ainda não rodou)
     assert out[3].text == "oi"
-    last_is_file = compact_history([msg(1, ["a1"]), msg(2, ["a2"])], curated_upto=5)
+    last_is_file = compact_history([msg(1, ["a1"], curated=True), msg(2, ["a2"], curated=True)])
     assert "conteúdo 2" in last_is_file[1].text  # a última nunca é encurtada
-    assert compact_history([msg(1, text="sem anexo")], curated_upto=9)[0].text == "sem anexo"
+    assert compact_history([msg(1, text="sem anexo", curated=True)])[0].text == "sem anexo"
 
 
 def test_guess_mime():

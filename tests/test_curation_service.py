@@ -76,7 +76,7 @@ def test_context_has_previous_curated_messages_only(log):
     curator = FakeCurator()
     for i in range(3):
         log.append("usuario", f"antiga {i}", at=at(i))
-    log.mark_curated(3)
+    log.mark_curated([1, 2, 3])
     log.append("usuario", "nova", at=at(5))
     service(log, curator).tick(T0 + timedelta(minutes=30))
     messages, context, _ = curator.calls[0]

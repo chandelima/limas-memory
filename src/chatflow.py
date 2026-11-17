@@ -7,7 +7,7 @@ e deixa o Curator trabalhar por inatividade. Quem chama cuida de mostrar o resul
 from dataclasses import replace
 from pathlib import Path
 
-from conversation.log import ConversationLog, Message
+from conversation.log import ANSWERED, FAILED, READY, RECEIVED, ConversationLog, Message
 from curator.agent import build_curator, curate
 from curator.service import CurationService, Outcome, to_chat
 from curator.tools import default_tools
@@ -49,6 +49,9 @@ def describe_status(service: CurationService) -> str:
     pending = len(service.log.pending())
     idle = service.seconds_idle()
     parts = [f"pendentes: {pending}"]
+    in_progress = len(service.log.unfinished())
+    if in_progress:
+        parts.append(f"mensagens em processamento: {in_progress}")
     if service.is_running:
         parts.append("curadoria em andamento")
     if idle is not None:
@@ -58,7 +61,7 @@ def describe_status(service: CurationService) -> str:
     return "[status] " + " | ".join(parts)
 
 
-def compact_history(messages: list[Message], curated_upto: int) -> list[Message]:
+def compact_history(messages: list[Message]) -> list[Message]:
     """Encurta, no histórico do agente de resposta, o conteúdo de arquivos antigos.
 
     Só encurta o que já foi curado (os dados já estão na memória) e nunca a última
@@ -67,7 +70,7 @@ def compact_history(messages: list[Message], curated_upto: int) -> list[Message]
     """
     out = []
     for i, m in enumerate(messages):
-        if m.attachments and m.id <= curated_upto and i < len(messages) - 1:
+        if m.attachments and m.curated and i < len(messages) - 1:
             header = m.text.splitlines()[0]
             omitted = "(conteúdo omitido do histórico; os dados estão na memória)"
             m = replace(m, text=f"{header}\n{omitted}")
@@ -87,17 +90,39 @@ class Conversation:
         self.agent = agent
         self.outbox = outbox if outbox is not None else []
 
-    def respond(self, text: str, attachments: list[str] | None = None) -> ReplyResult:
-        """Registra a fala do usuário, responde (lendo a memória) e registra a resposta."""
-        self.log.append("usuario", text, attachments=attachments)
-        recent = compact_history(self.log.recent(HISTORY_MESSAGES), self.log.curated_upto)
-        history = [to_chat(m) for m in recent]
+    # ---- 1. chegada: persistir logo, antes de qualquer processamento -------------
+
+    def ingest(self, text: str, attachments: list[str] | None = None, status: str = RECEIVED) -> Message:
+        """Grava a fala do usuário assim que ela chega, para não se perder se o bot cair."""
+        return self.log.append("usuario", text, attachments=attachments, status=status)
+
+    def set_content(self, msg_id: int, text: str, status: str = READY) -> Message:
+        """Preenche o conteúdo de uma mensagem (ex.: texto extraído de um arquivo)."""
+        return self.log.update(msg_id, text=text, status=status)
+
+    def fail(self, msg_id: int, text: str | None = None) -> Message:
+        """Dá a mensagem como resolvida sem resposta (arquivo ilegível, erro ao responder)."""
+        return self.log.update(msg_id, text=text, status=FAILED)
+
+    def unfinished(self) -> list[Message]:
+        return self.log.unfinished()
+
+    # ---- 2. resposta -------------------------------------------------------------
+
+    def respond_to(self, msg_id: int) -> ReplyResult:
+        """Responde à mensagem `msg_id` (já gravada), lendo a memória, e registra a resposta."""
+        history = compact_history(self.log.history(msg_id, HISTORY_MESSAGES))
         self.outbox.clear()
-        result = reply(history, agent=self.agent)
+        result = reply([to_chat(m) for m in history], agent=self.agent)
         result.files = list(self.outbox)
         self.outbox.clear()
-        self.log.append("assistente", result.text)
+        self.log.append("assistente", result.text, reply_to=msg_id)
+        self.log.update(msg_id, status=ANSWERED)
         return result
+
+    def respond(self, text: str, attachments: list[str] | None = None) -> ReplyResult:
+        """Atalho: grava a fala do usuário e responde na sequência."""
+        return self.respond_to(self.ingest(text, attachments=attachments, status=READY).id)
 
     def curate_now(self) -> str:
         outcome = self.service.run_now()

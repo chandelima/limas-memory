@@ -110,7 +110,7 @@ class CurationService:
             pending = self.log.pending()
             if not pending:
                 return None
-            context = format_context(self.log.before(pending[0].id, CONTEXT_MESSAGES))
+            context = format_context(self.log.curated_context(CONTEXT_MESSAGES))
             try:
                 result = self.curate_fn([to_chat(m) for m in pending], context, self.channel)
             except Exception as exc:  # noqa: BLE001 - falha vira Outcome; mensagens ficam pendentes
@@ -118,7 +118,7 @@ class CurationService:
                 self._failed_at = now or datetime.now().astimezone()
                 return Outcome(len(pending), error=self.last_error)
             self.last_error, self._failed_at = "", None
-            self.log.mark_curated(pending[-1].id)
+            self.log.mark_curated([m.id for m in pending])
             self.log.prune(KEEP_MESSAGES)
             return Outcome(len(pending), result=result)
         finally:
