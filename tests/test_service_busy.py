@@ -11,7 +11,7 @@ T0 = datetime.fromisoformat("2026-11-17T10:00:00-03:00")
 
 def make_service(tmp_path, curator, **kw):
     log = ConversationLog(tmp_path / "c.json")
-    log.append("usuario", "oi", at=T0.isoformat())
+    log.append("user", "hi", at=T0.isoformat())
     return CurationService(log, curator, channel="Telegram", **kw)
 
 
@@ -27,11 +27,11 @@ def test_tick_returns_none_while_busy_so_nobody_is_notified(tmp_path):
     holder["service"] = service
     assert service.run_now().ok
     assert holder["inner_tick"] is None and holder["running"] is True
-    assert not service.is_running  # liberado ao terminar
+    assert not service.is_running  # released when it finishes
 
 
 def test_describe_outcome_for_busy():
-    assert "já há uma curadoria em andamento" in describe_outcome(Outcome(0, busy=True))
+    assert "a curation is already running" in describe_outcome(Outcome(0, busy=True))
 
 
 def test_status_mentions_running_curation_only_while_it_runs(tmp_path):
@@ -44,8 +44,8 @@ def test_status_mentions_running_curation_only_while_it_runs(tmp_path):
     service = make_service(tmp_path, curator)
     seen["service"] = service
     service.run_now()
-    assert "curadoria em andamento" in seen["during"]
-    assert "curadoria em andamento" not in describe_status(service)
+    assert "curation running" in seen["during"]
+    assert "curation running" not in describe_status(service)
 
 
 def test_watch_awaits_async_callbacks_and_survives_callback_errors(tmp_path, caplog):
@@ -58,10 +58,10 @@ def test_watch_awaits_async_callbacks_and_survives_callback_errors(tmp_path, cap
         async def on_outcome(outcome):
             events.append(outcome)
             stop.set()
-            raise RuntimeError("callback com defeito")
+            raise RuntimeError("faulty callback")
 
         await asyncio.wait_for(service.watch(stop, interval=0.01, on_outcome=on_outcome), timeout=5)
 
     asyncio.run(scenario())
-    assert len(events) == 1  # o laço terminou normalmente apesar do erro no callback
-    assert "erro ao tratar o resultado" in caplog.text
+    assert len(events) == 1  # the loop ended normally despite the callback error
+    assert "error handling the curation result" in caplog.text

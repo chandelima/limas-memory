@@ -1,18 +1,18 @@
-"""Histórico da conversa em arquivo JSON (fora de memory/, não versionado).
+"""Conversation history in a JSON file (outside memory/, not versioned).
 
-Guarda todas as mensagens, cada uma com um estado, e é gravado de forma atômica a cada
-alteração: a mensagem do usuário é persistida assim que chega, antes de qualquer
-processamento, então sobrevive a uma queda do bot e pode ser retomada ao reiniciar.
+Keeps every message, each with a status, and is written atomically on every change:
+the user's message is persisted as soon as it arrives, before any processing, so it
+survives a bot crash and can be resumed on restart.
 
-Estados de uma mensagem do usuário:
-    received  chegou, ainda sem resposta
-    reading   é um arquivo ainda sendo lido
-    ready     conteúdo pronto, aguardando a resposta
-    answered  respondida (estado final)
-    failed    não deu para ler/responder (estado final)
-As respostas do assistente nascem `answered` e guardam `reply_to` (a mensagem do usuário a
-que respondem), o que mantém a ordem da conversa mesmo com várias mensagens em seguida.
-Cada mensagem tem também a marca `curated`: o Curator já processou (ou não).
+Statuses of a user message:
+    received  arrived, no answer yet
+    reading   a file that is still being read
+    ready     content ready, waiting for the answer
+    answered  answered (final state)
+    failed    could not be read/answered (final state)
+Assistant replies are born `answered` and keep `reply_to` (the user message they answer),
+which preserves the conversation order even with several messages in a row.
+Each message also has the `curated` flag: whether the Curator has processed it.
 """
 
 import json
@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-ROLES = ("usuario", "assistente")
+ROLES = ("user", "assistant")
 
 RECEIVED, READING, READY, ANSWERED, FAILED = "received", "reading", "ready", "answered", "failed"
 IN_PROGRESS = (RECEIVED, READING, READY)
@@ -35,18 +35,18 @@ class Message:
     id: int
     role: str
     text: str
-    at: str  # ISO 8601 com fuso
-    attachments: list[str] = field(default_factory=list)  # IDs de anexos (anexos/<id>.md)
-    status: str = ANSWERED  # arquivos antigos, sem o campo, valem como já respondidos
-    reply_to: int | None = None  # assistente: id da mensagem do usuário que ele responde
+    at: str  # ISO 8601 with time zone
+    attachments: list[str] = field(default_factory=list)  # attachment IDs (attachments/<id>.md)
+    status: str = ANSWERED  # old files without the field count as already answered
+    reply_to: int | None = None  # assistant: id of the user message it answers
     curated: bool = False
 
 
 def order_key(m: Message) -> tuple[int, int]:
-    """Ordem da conversa: a resposta vem logo depois da mensagem a que responde."""
-    if m.role == "assistente" and m.reply_to is not None:
+    """Conversation order: a reply comes right after the message it answers."""
+    if m.role == "assistant" and m.reply_to is not None:
         return (m.reply_to, 1)
-    return (m.id, 0 if m.role == "usuario" else 1)
+    return (m.id, 0 if m.role == "user" else 1)
 
 
 class ConversationLog:
@@ -57,7 +57,7 @@ class ConversationLog:
         self._next_id = 1
         self._load()
 
-    # ---- persistência -----------------------------------------------------
+    # ---- persistence ------------------------------------------------------
 
     def _load(self) -> None:
         if not self.path.exists():
@@ -66,13 +66,8 @@ class ConversationLog:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             self._messages = [Message(**m) for m in data["messages"]]
             self._next_id = int(data["next_id"])
-            legacy_upto = data.get("curated_upto")  # formato anterior: marca d'água por id
-            if legacy_upto:
-                for m in self._messages:
-                    if m.id <= int(legacy_upto):
-                        m.curated = True
         except (ValueError, KeyError, TypeError):
-            # Arquivo corrompido: guarda de lado (para inspeção) e começa limpo.
+            # Corrupt file: set it aside (for inspection) and start clean.
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             self.path.replace(self.path.with_name(f"{self.path.name}.corrupt-{stamp}"))
             self._messages, self._next_id = [], 1
@@ -82,9 +77,9 @@ class ConversationLog:
         data = {"messages": [asdict(m) for m in self._messages], "next_id": self._next_id}
         tmp = self.path.with_name(self.path.name + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)  # troca atômica
+        os.replace(tmp, self.path)  # atomic swap
 
-    # ---- escrita ----------------------------------------------------------
+    # ---- writing ----------------------------------------------------------
 
     def append(
         self,
@@ -96,12 +91,12 @@ class ConversationLog:
         reply_to: int | None = None,
     ) -> Message:
         if role not in ROLES:
-            raise ValueError(f"role deve ser um de {ROLES}")
+            raise ValueError(f"role must be one of {ROLES}")
         if status not in STATUSES:
-            raise ValueError(f"status deve ser um de {STATUSES}")
+            raise ValueError(f"status must be one of {STATUSES}")
         text = text.strip()
         if not text:
-            raise ValueError("Mensagem vazia")
+            raise ValueError("Empty message")
         with self._lock:
             msg = Message(
                 id=self._next_id,
@@ -118,9 +113,9 @@ class ConversationLog:
             return msg
 
     def update(self, msg_id: int, text: str | None = None, status: str | None = None) -> Message:
-        """Atualiza o texto e/ou o estado de uma mensagem (KeyError se não existir)."""
+        """Update a message's text and/or status (KeyError if it does not exist)."""
         if status is not None and status not in STATUSES:
-            raise ValueError(f"status deve ser um de {STATUSES}")
+            raise ValueError(f"status must be one of {STATUSES}")
         with self._lock:
             msg = self._find(msg_id)
             if text is not None:
@@ -131,7 +126,7 @@ class ConversationLog:
             return msg
 
     def mark_curated(self, ids) -> None:
-        """Marca as mensagens indicadas como já processadas pelo Curator."""
+        """Mark the given messages as already processed by the Curator."""
         wanted = set(ids)
         with self._lock:
             changed = False
@@ -142,8 +137,8 @@ class ConversationLog:
                 self._save()
 
     def prune(self, keep: int) -> int:
-        """Descarta mensagens já curadas, mantendo as `keep` mais recentes da conversa.
-        Mensagens não curadas (inclusive as em andamento) nunca são removidas."""
+        """Discard already-curated messages, keeping the `keep` most recent of the conversation.
+        Messages not yet curated (including those in progress) are never removed."""
         with self._lock:
             ordered = sorted(self._messages, key=order_key)
             keep_ids = {m.id for m in ordered[-keep:]} if keep > 0 else set()
@@ -154,59 +149,59 @@ class ConversationLog:
                 self._save()
             return removed
 
-    # ---- leitura ----------------------------------------------------------
+    # ---- reading ----------------------------------------------------------
 
     def _find(self, msg_id: int) -> Message:
         for m in self._messages:
             if m.id == msg_id:
                 return m
-        raise KeyError(f"mensagem {msg_id} não existe")
+        raise KeyError(f"message {msg_id} does not exist")
 
     def get(self, msg_id: int) -> Message:
         with self._lock:
             return self._find(msg_id)
 
     def messages(self) -> list[Message]:
-        """Em ordem de chegada (por id)."""
+        """In arrival order (by id)."""
         with self._lock:
             return list(self._messages)
 
     def recent(self, n: int) -> list[Message]:
-        """As `n` últimas, na ordem da conversa."""
+        """The last `n`, in conversation order."""
         with self._lock:
             return sorted(self._messages, key=order_key)[-n:] if n > 0 else []
 
     def history(self, upto_id: int, n: int) -> list[Message]:
-        """Até `n` mensagens, na ordem da conversa, terminando na mensagem `upto_id` do
-        usuário. Inclui só falas já respondidas mais a própria `upto_id`: mensagens em
-        andamento, descartadas ou com falha (sem resposta) e as posteriores ficam de fora."""
+        """Up to `n` messages, in conversation order, ending at the user message `upto_id`.
+        Includes only already-answered turns plus `upto_id` itself: messages in progress,
+        discarded or failed (with no reply) and later ones are left out."""
         with self._lock:
             chosen = []
             for m in self._messages:
-                if m.role == "usuario":
+                if m.role == "user":
                     if m.id == upto_id or (m.id < upto_id and m.status == ANSWERED):
                         chosen.append(m)
-                else:  # resposta do assistente: entra se responde a algo anterior a `upto_id`
+                else:  # assistant reply: included if it answers something before `upto_id`
                     ref = m.reply_to if m.reply_to is not None else m.id
                     if ref < upto_id:
                         chosen.append(m)
             return sorted(chosen, key=order_key)[-n:] if n > 0 else []
 
     def pending(self) -> list[Message]:
-        """Mensagens prontas para o Curator: ainda não curadas e em estado final."""
+        """Messages ready for the Curator: not yet curated and in a final state."""
         with self._lock:
             return sorted((m for m in self._messages if not m.curated and m.status in FINAL), key=order_key)
 
     def curated_context(self, n: int) -> list[Message]:
-        """As `n` últimas mensagens já curadas (contexto para a próxima curadoria)."""
+        """The last `n` already-curated messages (context for the next curation)."""
         with self._lock:
             done = sorted((m for m in self._messages if m.curated), key=order_key)
             return done[-n:] if n > 0 else []
 
     def unfinished(self) -> list[Message]:
-        """Mensagens do usuário que ainda não tiveram resposta (para retomar ao reiniciar)."""
+        """User messages that have not been answered yet (to resume after a restart)."""
         with self._lock:
-            return [m for m in self._messages if m.role == "usuario" and m.status in IN_PROGRESS]
+            return [m for m in self._messages if m.role == "user" and m.status in IN_PROGRESS]
 
     def last_message_at(self) -> datetime | None:
         with self._lock:

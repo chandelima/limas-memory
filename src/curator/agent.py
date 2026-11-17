@@ -1,6 +1,6 @@
-"""Agente Memory Curator: lê mensagens recentes e mantém a memória via tools.
+"""Memory Curator agent: reads recent messages and maintains the memory through tools.
 
-Não conversa com o usuário: a saída é um relatório curto do que fez.
+It does not talk to the user: its output is a short report of what it did.
 """
 
 from dataclasses import dataclass, field
@@ -14,14 +14,14 @@ import config
 from curator.tools import default_tools
 from llm import get_llm
 
-RECURSION_LIMIT = 40  # teto de passos (modelo <-> tools) por execução
+RECURSION_LIMIT = 40  # cap on steps (model <-> tools) per run
 
 
 @dataclass
 class ChatMessage:
-    role: str  # "usuario" ou "assistente"
+    role: str  # "user" or "assistant"
     text: str
-    at: str = ""  # data/hora ISO, se conhecida (ajuda a registrar a origem)
+    at: str = ""  # ISO date/time, if known (helps record the origin)
 
 
 @dataclass
@@ -33,7 +33,7 @@ class ToolEvent:
 
 @dataclass
 class Usage:
-    """Consumo de tokens somado sobre todas as chamadas ao modelo de uma execução."""
+    """Token usage summed over all model calls of a run."""
 
     input_tokens: int = 0
     output_tokens: int = 0
@@ -41,10 +41,10 @@ class Usage:
     cache_read: int = 0
     cache_creation: int = 0
     reasoning: int = 0
-    cost: float = 0.0  # só se o provedor informar (OpenRouter: usage.cost)
+    cost: float = 0.0  # only if the provider reports it (OpenRouter: usage.cost)
     cost_reported: bool = False
     llm_calls: int = 0
-    unreported_calls: int = 0  # chamadas sem metadados de uso
+    unreported_calls: int = 0  # calls without usage metadata
 
     def add(self, other: "Usage") -> None:
         for name in (
@@ -82,7 +82,7 @@ def aggregate_usage(messages: list) -> Usage:
 @dataclass
 class CurateResult:
     report: str
-    trace: list[ToolEvent] = field(default_factory=list)  # chamadas, na ordem
+    trace: list[ToolEvent] = field(default_factory=list)  # calls, in order
     usage: Usage = field(default_factory=Usage)
 
     @property
@@ -97,11 +97,11 @@ def load_system_prompt() -> str:
 def build_curator(
     llm: BaseChatModel | None = None, tools: list | None = None, model: str | None = None
 ):
-    """Monta o agente. Sem argumentos, usa o modelo e a memória configurados por env.
+    """Build the agent. With no arguments, uses the model and memory configured by env.
 
-    `model` escolhe o slug do OpenRouter (ignorado se `llm` for passado).
+    `model` picks the OpenRouter slug (ignored if `llm` is given).
     """
-    # temperature=0: a memória é permanente e versionada; queremos consistência.
+    # temperature=0: the memory is permanent and versioned; we want consistency.
     return create_agent(
         model=llm or get_llm(model=model, temperature=0),
         tools=tools if tools is not None else default_tools(),
@@ -114,21 +114,21 @@ def format_input(
     messages: list[ChatMessage],
     context: str = "",
     now: datetime | None = None,
-    channel: str = "desconhecido",
+    channel: str = "unknown",
 ) -> str:
     now = now or datetime.now().astimezone()
     lines = [
-        f"DATA E HORA ATUAIS: {now.isoformat(timespec='minutes')}",
-        f"CANAL: {channel}",
+        f"CURRENT DATE AND TIME: {now.isoformat(timespec='minutes')}",
+        f"CHANNEL: {channel}",
         "",
     ]
     if context.strip():
-        lines += ["CONTEXTO DA CONVERSA:", context.strip(), ""]
-    lines.append("MENSAGENS RECENTES:")
+        lines += ["CONVERSATION CONTEXT:", context.strip(), ""]
+    lines.append("RECENT MESSAGES:")
     for m in messages:
         stamp = f" ({m.at})" if m.at else ""
         lines.append(f"- [{m.role}{stamp}] {m.text}")
-    lines += ["", "Processe as mensagens acima conforme o seu fluxo de trabalho."]
+    lines += ["", "Process the messages above following your workflow."]
     return "\n".join(lines)
 
 
@@ -137,10 +137,10 @@ def curate(
     context: str = "",
     agent=None,
     now: datetime | None = None,
-    channel: str = "desconhecido",
+    channel: str = "unknown",
 ) -> CurateResult:
     if not messages:
-        raise ValueError("Nenhuma mensagem para curar")
+        raise ValueError("No messages to curate")
     agent = agent or build_curator()
     state = agent.invoke(
         {"messages": [HumanMessage(format_input(messages, context, now, channel))]},

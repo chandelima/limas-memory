@@ -1,6 +1,6 @@
-"""Agente de resposta: conversa com o usuário e consulta a memória (somente leitura).
+"""Chat agent: talks to the user and consults the memory (read-only).
 
-Nunca escreve na memória: só recebe as tools de leitura. Quem escreve é o Curator.
+It never writes to the memory: it only receives the read tools. The Curator writes.
 """
 
 from dataclasses import dataclass, field
@@ -23,47 +23,47 @@ RECURSION_LIMIT = 25
 class ReplyResult:
     text: str
     trace: list[ToolEvent] = field(default_factory=list)
-    files: list = field(default_factory=list)  # anexos a enviar junto com a resposta
+    files: list = field(default_factory=list)  # attachments to send along with the reply
     usage: Usage = field(default_factory=Usage)
 
 
 def load_system_prompt() -> str:
-    return (config.PROMPTS_DIR / "responder.md").read_text(encoding="utf-8")
+    return (config.PROMPTS_DIR / "chat_agent.md").read_text(encoding="utf-8")
 
 
 def default_read_tools(memory_dir=None) -> list:
     return build_read_tools(MemoryStore(memory_dir or config.MEMORY_DIR))
 
 
-def build_responder(llm: BaseChatModel | None = None, tools: list | None = None):
-    """Monta o agente. Sem argumentos, usa o modelo e a memória configurados por env."""
+def build_chat_agent(llm: BaseChatModel | None = None, tools: list | None = None):
+    """Build the agent. With no arguments, uses the model and memory configured by env."""
     return create_agent(
         model=llm or get_llm(),
         tools=tools if tools is not None else default_read_tools(),
         system_prompt=load_system_prompt(),
-        name="responder",
+        name="chat_agent",
     )
 
 
 def _to_messages(history: list[ChatMessage], now: datetime):
-    """Histórico -> mensagens do LangChain. A data atual vai na última fala do usuário."""
+    """History -> LangChain messages. The current date goes on the last user message."""
     out = []
     for i, m in enumerate(history):
-        if m.role == "assistente":
+        if m.role == "assistant":
             out.append(AIMessage(m.text))
             continue
         text = m.text
         if i == len(history) - 1:
-            text = f"[agora: {now.isoformat(timespec='minutes')}]\n{text}"
+            text = f"[now: {now.isoformat(timespec='minutes')}]\n{text}"
         out.append(HumanMessage(text))
     return out
 
 
 def reply(history: list[ChatMessage], agent=None, now: datetime | None = None) -> ReplyResult:
-    """Responde à última mensagem do usuário (que deve ser a última do histórico)."""
-    if not history or history[-1].role != "usuario":
-        raise ValueError("O histórico deve terminar com uma mensagem do usuário")
-    agent = agent or build_responder()
+    """Answer the user's last message (which must be the last one in the history)."""
+    if not history or history[-1].role != "user":
+        raise ValueError("The history must end with a user message")
+    agent = agent or build_chat_agent()
     now = now or datetime.now().astimezone()
     state = agent.invoke(
         {"messages": _to_messages(history, now)},
