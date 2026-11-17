@@ -4,12 +4,12 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
-# git: a memória é um repositório (commit/push do Curator).
-# tzdata do sistema: sem ele a variável TZ é ignorada e "hoje" vira o dia em UTC.
+# git: the memory is a repository (Curator commits/pushes).
+# system tzdata: without it the TZ variable is ignored and "today" becomes the UTC day.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/* \
-    # a pasta montada pode pertencer a outro usuário do host: o git recusaria o repo sem isso
+    # the mounted folder may belong to another host user: git would refuse the repo without this
     && git config --system --add safe.directory '*'
 
 WORKDIR /app
@@ -18,9 +18,9 @@ RUN pip install -r requirements.txt
 
 COPY src ./src
 
-# Dados fora da imagem: /memory (repositório git da memória) e /data (histórico da conversa e estado do resumo).
+# Data outside the image: /memory (the memory git repository) and /data (conversation history and briefing state).
 ENV MEMORY_DIR=/memory \
-    CONVERSATION_FILE=/data/conversa.json \
+    CONVERSATION_FILE=/data/conversation.json \
     BRIEFING_STATE_FILE=/data/briefing.json
 
 RUN useradd --create-home --uid 1000 limas && mkdir -p /data /memory && chown limas /data /memory

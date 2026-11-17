@@ -41,9 +41,9 @@ Telegram ──► bot ──► Chat Agent ──► reads memory/ ──► re
   (daily, weekly, monthly), links to the related memory document, and an index. Completed tasks older than 30 days
   are archived.
 - **Task buttons**: `/todo` (or any request to list tasks) shows a panel where each task is a button, `⭕`
-  pending / `🟢` done; tap to toggle. Multi-day panels prefix each task with `[Hoje 18:00]`, `[Amanhã 07:00]`,
-  `[31/01 15:00]` (the day names are in Portuguese).
-- **Lists** (shopping, movies, books…): loose items without a date are kept by the Curator in `listas/<name>.md`
+  pending / `🟢` done; tap to toggle. Multi-day panels prefix each task with `[Today 18:00]`, `[Tomorrow 07:00]`,
+  `[31/01 15:00]`.
+- **Lists** (shopping, movies, books…): loose items without a date are kept by the Curator in `lists/<name>.md`
   rather than becoming tasks.
 - **Morning briefing**: every day at `BRIEFING_TIME` the bot sends overdue, today's and upcoming tasks (nothing if
   there is nothing to say). If the bot was down at that time, it catches up until noon.
@@ -59,7 +59,7 @@ Telegram ──► bot ──► Chat Agent ──► reads memory/ ──► re
 |---|---|
 | `/status` | Pending messages, curation state, last error |
 | `/curate` | Runs the Curator now on whatever is pending and replies with its report |
-| `/todo [hoje\|semana\|pendentes] [tag]` | Task panel with buttons: today and the next days (default), the next 7 days, or all pending; the optional tag filters |
+| `/todo [today\|week\|pending] [tag]` | Task panel with buttons: today and the next days (default), the next 7 days, or all pending; the optional tag filters |
 
 Only the user in `TELEGRAM_ALLOWED_USER_ID` is served, and only in a private chat.
 
@@ -148,7 +148,7 @@ Layout:
 src/
   bot.py, telegram_gateway.py   Telegram handlers and the thin wrapper around the Telegram API
   chatflow.py                   conversation flow: ingest → respond → curate → sync
-  responder/, curator/          the two agents (prompts in src/prompts/*.md)
+  chat_agent/, curator/         the two agents (prompts in src/prompts/*.md)
   storage/                      MemoryStore (path-confined, Markdown only), index, git
   tasks/                        task store, tools, button panel
   attachments/                  file reading, registry, resend tool
@@ -161,7 +161,7 @@ tests/
 Try the Curator on a sample conversation without touching your real memory:
 
 ```bash
-python src/curate.py evals/scenarios/02_fato_novo.txt --memory-dir /tmp/memory-test --verbose
+python src/curate.py evals/scenarios/02_new_fact.txt --memory-dir /tmp/memory-test --verbose
 ```
 
 Compare models on the Curator scenarios (writes `compare-report.md` and `compare-results.json`; each run uses a
