@@ -109,7 +109,14 @@ class AttachmentRegistry:
                 size=size, caption=caption.strip(),
                 received_at=received_at or datetime.now().astimezone().isoformat(timespec="seconds"),
             )
-            self.store.write_doc(_path(new_id), _render(item), internal=True)
+            return self.put(item)
+
+    def put(self, item: Attachment) -> Attachment:
+        """Grava um anexo com o ID já definido (usado na migração do registro antigo)."""
+        if not _ID.match(item.id):
+            raise ValueError(f"ID de anexo inválido: {item.id!r}")
+        with self._lock:
+            self.store.write_doc(_path(item.id), _render(item), internal=True)
             return item
 
     def get(self, attachment_id: str) -> Attachment | None:
