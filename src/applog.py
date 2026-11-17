@@ -233,7 +233,7 @@ def configure_logging(console_level: int | str = logging.INFO, channel_level: in
     root.addHandler(console)
     root.setLevel(min(console_level, logging.WARNING))
     # bibliotecas ficam em WARNING: o httpx loga a URL de cada chamada, e ela contém o token do bot
-    for name in ("httpx", "httpcore", "telegram", "apscheduler"):
+    for name in ("httpx", "httpx2", "httpcore", "telegram", "apscheduler"):
         logging.getLogger(name).setLevel(logging.WARNING)
     app = logging.getLogger(ROOT_NAME)
     app.setLevel(logging.DEBUG)
