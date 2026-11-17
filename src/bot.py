@@ -17,6 +17,8 @@ Fluxo de cada mensagem:
   3. depois de CURATOR_IDLE_SECONDS sem mensagens, o Curator processa o que ficou pendente e
      o relatório é enviado a você (uma falha é avisada uma vez por sequência).
 Se o bot cair no meio, ao reiniciar ele retoma as mensagens sem resposta das últimas 24 h.
+Todo dia, no horário de BRIEFING_TIME (padrão 06:00), manda o resumo da manhã com as tarefas
+de hoje, as atrasadas e as dos próximos dias (nada, se não houver nenhuma).
 Comandos: /status e /curate (não vão para o modelo).
 """
 
@@ -33,6 +35,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 import config
 from attachments import reader
+from briefing import BriefingScheduler, parse_hhmm
 from attachments.registry import AttachmentRegistry
 from attachments.tools import build_attachment_tools
 from chatflow import Conversation, build_service, describe_outcome
@@ -67,6 +70,7 @@ class BotHandlers:
         read_document=reader.read_document,
         verbose: bool = False,
         gateway_factory=TelegramGateway,
+        briefing: BriefingScheduler | None = None,
     ):
         self.conversation = conversation
         self.allowed_user_id = allowed_user_id
@@ -74,6 +78,7 @@ class BotHandlers:
         self.read_document = read_document
         self.verbose = verbose  # imprime no console as consultas à memória de cada resposta
         self.gateway_factory = gateway_factory
+        self.briefing = briefing  # resumo da manhã; None = desligado
         self._lock = asyncio.Lock()  # uma mensagem por vez: o histórico é sequencial
 
     def _authorized(self, update: Update) -> bool:
@@ -286,6 +291,11 @@ async def post_init(app: Application) -> None:
         app.bot_data["service"].watch(stop, WATCH_INTERVAL, on_outcome=lambda outcome: notify_outcome(app, outcome))
     )
     app.bot_data["recovery"] = asyncio.create_task(_safe_recover(app.bot_data["handlers"], gateway))
+    allowed = app.bot_data.get("allowed_user_id")
+    briefing = getattr(app.bot_data["handlers"], "briefing", None)
+    if briefing is not None and allowed is not None:
+        app.bot_data["briefing"] = asyncio.create_task(
+            briefing.run(stop, lambda text: gateway.send_text(allowed, text)))
 
 
 async def post_shutdown(app: Application) -> None:
@@ -296,6 +306,12 @@ async def post_shutdown(app: Application) -> None:
     if stop is None or watcher is None:
         return
     stop.set()
+    briefing = app.bot_data.get("briefing")
+    if briefing is not None:
+        try:
+            await asyncio.wait_for(briefing, timeout=5)  # com `stop` ligado, termina na hora
+        except asyncio.TimeoutError:
+            briefing.cancel()
     try:
         await asyncio.wait_for(watcher, timeout=SHUTDOWN_WAIT)  # deixa uma curadoria terminar
     except asyncio.TimeoutError:
@@ -343,6 +359,11 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     if not config.TELEGRAM_BOT_TOKEN:
         print("Erro: defina TELEGRAM_BOT_TOKEN no ambiente ou no .env (token do @BotFather)", file=sys.stderr)
         return 1
+    try:
+        briefing_at = parse_hhmm(config.BRIEFING_TIME)
+    except ValueError as exc:
+        print(f"Erro: BRIEFING_TIME: {exc}", file=sys.stderr)
+        return 1
     memory_store = MemoryStore(args.memory_dir or config.MEMORY_DIR)
     registry = AttachmentRegistry(memory_store)
     tasks = TaskStore(memory_store)  # lista de tarefas (todos/todo.md), gravada por código
@@ -359,12 +380,15 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     configure_logging()
     log = ConversationLog(args.log or config.CONVERSATION_FILE)
     service = build_service(log, args.memory_dir, args.idle_seconds, channel="Telegram")
+    briefing = (BriefingScheduler(tasks, briefing_at, config.BRIEFING_STATE_FILE, log=log)
+                if briefing_at else None)
     handlers = BotHandlers(Conversation(log, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID,
-                           registry, verbose=args.verbose)
+                           registry, verbose=args.verbose, briefing=briefing)
     app = application_factory(config.TELEGRAM_BOT_TOKEN, handlers, service)
 
     print(f"Bot iniciado | modelo: {config.OPENROUTER_MODEL} | memória: {args.memory_dir or config.MEMORY_DIR}")
     print(f"Histórico: {log.path} | Curador após {args.idle_seconds:.0f}s de inatividade")
+    print(f"Resumo da manhã: {briefing_at:%H:%M}" if briefing_at else "Resumo da manhã: desligado")
     if config.TELEGRAM_ALLOWED_USER_ID is None:
         print("ATENÇÃO: TELEGRAM_ALLOWED_USER_ID não definido. O bot recusará todos e imprimirá "
               "o ID de quem escrever.")

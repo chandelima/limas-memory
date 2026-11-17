@@ -37,3 +37,8 @@ TELEGRAM_ALLOWED_USER_ID = int(_allowed) if _allowed.isdigit() else None
 # (o registro dos arquivos fica em MEMORY_DIR/anexos/, como Markdown)
 DOCUMENT_MODEL = os.getenv("DOCUMENT_MODEL", "")  # vazio = usa OPENROUTER_MODEL
 PDF_ENGINE = os.getenv("PDF_ENGINE", "")  # vazio = o OpenRouter escolhe; ou cloudflare-ai, mistral-ocr, native
+
+# Resumo da manhã no Telegram: horário local (HH:MM; "off" desliga) e o arquivo que guarda
+# em que dia ele foi enviado pela última vez
+BRIEFING_TIME = os.getenv("BRIEFING_TIME", "06:00")
+BRIEFING_STATE_FILE = Path(os.getenv("BRIEFING_STATE_FILE", ROOT / "data" / "briefing.json")).resolve()
