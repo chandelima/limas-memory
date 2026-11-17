@@ -41,7 +41,8 @@ Telegram ──► bot ──► Chat Agent ──► reads memory/ ──► re
   (daily, weekly, monthly), links to the related memory document, and an index. Completed tasks older than 30 days
   are archived.
 - **Task buttons**: `/todo` (or any request to list tasks) shows a panel where each task is a button, `⭕`
-  pending / `🟢` done; tap to toggle. Multi-day panels prefix each task with `[Today 18:00]`, `[Tomorrow 07:00]`,
+  pending / `🟢` done; tapping one opens its card (full text, when, tags, linked document) with buttons to
+  check/uncheck it and to go back to the list, so long tasks are never cut off. Multi-day panels prefix each task with `[Today 18:00]`, `[Tomorrow 07:00]`,
   `[31/01 15:00]`.
 - **Lists** (shopping, movies, books…): loose items without a date are kept by the Curator in `lists/<name>.md`
   rather than becoming tasks.

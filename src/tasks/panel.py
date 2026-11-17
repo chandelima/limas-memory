@@ -1,26 +1,32 @@
-"""Task panel with buttons on Telegram: ⭕ pending / 🟢 done; tapping toggles.
+"""Task panel with buttons on Telegram: ⭕ pending / 🟢 done.
 
-The panel is built straight from the task file (no model). Each button's state is
-decided at tap time (not from the button text), so an old panel never undoes or
-redoes anything by mistake: a tap always flips the task's CURRENT state.
+The panel lists the tasks; tapping one opens its detail card (full text, when, tags) with a
+button to check or uncheck it and one to go back to the list. Everything is built straight
+from the task file (no model). The state is decided at tap time (not from the button text), so
+an old panel never undoes or redoes anything by mistake: the toggle always flips the task's
+CURRENT state.
 
-callback_data: `tk:<id>:<YYYYMMDD>:<scope>:<tag>` (fits in Telegram's 64 bytes).
+callback_data (all fit in Telegram's 64 bytes):
+  tk:<id>:<YYYYMMDD>:<scope>:<tag>   open the detail card
+  tt:<id>:<YYYYMMDD>:<scope>:<tag>   toggle done / not done (from the card)
+  tb::::<scope>:<tag>                back to the list
 """
 
 from dataclasses import dataclass
 from datetime import date, time
+from typing import NamedTuple
 
 from i18n import t
 from tasks import model
 from tasks.format import day_short
-from tasks.model import TaskError, fmt_time
+from tasks.model import TaskError, fmt_time, with_tags
 from tasks.store import TaskStore
 
 PANEL_SCOPES = {"today": "t", "week": "w", "pending": "p"}
 _SCOPE_NAMES = {v: k for k, v in PANEL_SCOPES.items()}
 MAX_BUTTONS = 40
 LABEL_MAX = 56
-PREFIX = "tk"
+OPEN, TOGGLE, BACK = "tk", "tt", "tb"
 
 
 @dataclass
@@ -92,19 +98,44 @@ def build_items(tasks: TaskStore, scope: str = "today", tag: str = "") -> tuple[
 
 def encode(item: PanelItem, scope: str, tag: str = "") -> str:
     tag = model.normalize_tag(tag) if tag else ""
-    return f"{PREFIX}:{item.id}:{item.on:%Y%m%d}:{PANEL_SCOPES[scope]}:{tag}"[:64]
+    return f"{OPEN}:{item.id}:{item.on:%Y%m%d}:{PANEL_SCOPES[scope]}:{tag}"[:64]
 
 
-def decode(data: str) -> tuple[str, date, str, str] | None:
-    """(id, day, scope, tag), or None if it is not a valid task callback."""
+def encode_toggle(task_id: str, on: date, scope: str, tag: str = "") -> str:
+    tag = model.normalize_tag(tag) if tag else ""
+    return f"{TOGGLE}:{task_id}:{on:%Y%m%d}:{PANEL_SCOPES[scope]}:{tag}"[:64]
+
+
+def encode_back(scope: str, tag: str = "") -> str:
+    tag = model.normalize_tag(tag) if tag else ""
+    return f"{BACK}::::{PANEL_SCOPES[scope]}:{tag}"[:64]
+
+
+class Action(NamedTuple):
+    kind: str  # OPEN | TOGGLE | BACK
+    id: str
+    day: date | None
+    scope: str
+    tag: str
+
+
+def decode(data: str) -> Action | None:
+    """The action behind a callback_data, or None if it is not a valid task callback."""
     parts = data.split(":", 4)
-    if len(parts) != 5 or parts[0] != PREFIX or parts[3] not in _SCOPE_NAMES:
+    if len(parts) != 5 or parts[0] not in (OPEN, TOGGLE, BACK):
+        return None
+    if parts[0] == BACK:  # tb::::<scope>:<tag>  (the id and day slots are empty)
+        rest = data.split(":", 5)
+        if len(rest) != 6 or rest[4] not in _SCOPE_NAMES:
+            return None
+        return Action(BACK, "", None, _SCOPE_NAMES[rest[4]], rest[5])
+    if parts[3] not in _SCOPE_NAMES:
         return None
     try:
         day = date(int(parts[2][:4]), int(parts[2][4:6]), int(parts[2][6:]))
     except ValueError:
         return None
-    return parts[1], day, _SCOPE_NAMES[parts[3]], parts[4]
+    return Action(parts[0], parts[1], day, _SCOPE_NAMES[parts[3]], parts[4])
 
 
 def build_panel(tasks: TaskStore, scope: str = "today", tag: str = "") -> tuple[str, list[list[tuple[str, str]]]]:
@@ -115,10 +146,41 @@ def build_panel(tasks: TaskStore, scope: str = "today", tag: str = "") -> tuple[
     head = t("panel_head", where=where, day=day_short(today)) + (f" #{model.normalize_tag(tag)}" if tag else "")
     if not items:
         return t("panel_none", head=head), []
-    text = f"{head}\n{t('panel_title')}"
+    text = f"{head}\n{t('panel_hint')}"
     if total > len(items):
         text += "\n" + t("panel_showing", shown=len(items), total=total)
     return text, [[(it.label(), encode(it, scope, tag))] for it in items]
+
+
+def build_detail(tasks: TaskStore, task_id: str, on: date, scope: str = "today", tag: str = ""
+                 ) -> tuple[str, list[list[tuple[str, str]]]]:
+    """The detail card of a task: full text with tags, state, when, recurrence and the linked
+    document, plus the buttons to check/uncheck it and to go back to the list."""
+    tl = tasks.load()
+    today = tasks.today()
+    item = next((x for x in tl.recurring if x.id == task_id), None)
+    if item is not None:
+        done = any(c.id == task_id and c.done_on == on for c in tl.done)
+    elif (item := next((x for x in tl.pending if x.id == task_id), None)) is not None:
+        done = False
+    elif (item := next((c for c in tl.done if c.id == task_id), None)) is not None:
+        done = True
+    else:
+        raise TaskError(t("task_gone"))
+    lines = [with_tags(item.text, item.tags), "", t("detail_done" if done else "detail_pending")]
+    recurrence = getattr(item, "recurrence", None)
+    at = fmt_time(item.due_time)
+    if recurrence is not None:
+        lines.append(t("detail_repeats", rule=f"{recurrence.render()}{' ' + at if at else ''}"))
+    elif item.due_date is not None:
+        lines.append(t("detail_when", when=f"{day_name(item.due_date, today)}{' ' + at if at else ''}"))
+    else:
+        lines.append(t("detail_no_date"))
+    if item.ref:
+        lines.append(t("detail_see", ref=item.ref))
+    rows = [[(t("btn_reopen" if done else "btn_complete"), encode_toggle(task_id, on, scope, tag))],
+            [(t("btn_back"), encode_back(scope, tag))]]
+    return "\n".join(lines), rows
 
 
 def toggle(tasks: TaskStore, task_id: str, on: date) -> tuple[str, bool]:

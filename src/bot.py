@@ -147,8 +147,8 @@ class BotHandlers:
         else:
             await gateway.send_text(chat_id, text)
 
-    async def on_task_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Tap on a panel button: flips the task's state and redraws the panel."""
+    async def on_task_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """A tap in the task panel: open a task's card, check/uncheck it from the card, or go back."""
         query = update.callback_query
         if query is None or not self._authorized(update) or self.tasks is None:
             return
@@ -157,18 +157,25 @@ class BotHandlers:
         if parsed is None:
             await gateway.answer_callback(query.id)
             return
-        task_id, on, scope, tag = parsed
+        notice = ""
         try:
-            text, done = await asyncio.to_thread(panel.toggle, self.tasks, task_id, on)
-            notice = t("task_completed" if done else "task_reopened", text=text)
+            if parsed.kind == panel.TOGGLE:
+                text, done = await asyncio.to_thread(panel.toggle, self.tasks, parsed.id, parsed.day)
+                notice = t("task_completed" if done else "task_reopened", text=text)
+            if parsed.kind == panel.BACK:
+                new_text, rows = await asyncio.to_thread(panel.build_panel, self.tasks, parsed.scope, parsed.tag)
+            else:  # open, or toggle (which stays on the card, now showing the new state)
+                new_text, rows = await asyncio.to_thread(
+                    panel.build_detail, self.tasks, parsed.id, parsed.day, parsed.scope, parsed.tag)
         except TaskError as exc:
-            notice = t("task_failed", error=exc)
+            await gateway.answer_callback(query.id, t("task_failed", error=exc)[:190])
+            return
         except Exception:  # noqa: BLE001
-            log.exception("error toggling task %s", task_id)
-            notice = t("task_update_error")
+            log.exception("error handling a task panel tap (%s)", parsed.kind)
+            await gateway.answer_callback(query.id, t("task_update_error"))
+            return
         await gateway.answer_callback(query.id, notice[:190])
         try:
-            new_text, rows = await asyncio.to_thread(panel.build_panel, self.tasks, scope, tag)
             await gateway.edit_buttons(update.effective_chat.id, query.message.message_id, new_text, rows)
         except Exception:  # noqa: BLE001 - e.g. "message is not modified"
             log.warning("could not update the task panel", exc_info=True)
@@ -464,7 +471,7 @@ def build_application(token: str, handlers: BotHandlers, service) -> Application
     app.add_handler(CommandHandler("status", handlers.on_status))
     app.add_handler(CommandHandler("curate", handlers.on_curate))
     app.add_handler(CommandHandler("todo", handlers.on_todo))
-    app.add_handler(CallbackQueryHandler(handlers.on_task_toggle, pattern=r"^tk:"))
+    app.add_handler(CallbackQueryHandler(handlers.on_task_action, pattern=r"^t[ktb]:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.on_message))
     app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, handlers.on_file))
     app.add_handler(MessageHandler(filters.COMMAND, handlers.on_unknown))  # always last

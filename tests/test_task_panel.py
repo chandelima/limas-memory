@@ -24,9 +24,9 @@ def test_panel_shows_unchecked_and_checked_buttons_with_callback_data(tasks):
     b = tasks.add("Call the bank", TODAY)
     tasks.complete(b.id)
     text, rows = panel.build_panel(tasks)
-    assert "check or uncheck" in text
+    assert "Tap a task to open it" in text
     assert labels(rows) == ["⭕ [08:00] Doctor appointment", "🟢 Call the bank"]  # same day: only the time
-    assert panel.decode(rows[0][0][1]) == (a.id, TODAY, "today", "")
+    assert panel.decode(rows[0][0][1]) == panel.Action("tk", a.id, TODAY, "today", "")
     assert all(len(data.encode()) <= 64 for _, data in sum(rows, []))
 
 
@@ -89,3 +89,42 @@ def test_multi_day_panel_prefixes_every_dated_task_with_today_tomorrow_or_date(t
     tasks.add("E", date(2026, 11, 17))  # yesterday
     _, rows = panel.build_panel(tasks, "pending")
     assert labels(rows) == ["⭕ [Yesterday] E", "⭕ [Today] B", "⭕ [Today 18:00] A", "⭕ [Tomorrow 07:00] C", "⭕ [31/01 15:00] D"]
+
+
+LONG = "Medical appointment with Dr. Francisco Patriota at ProntoMED, bring the exams and the insurance card"
+
+
+def test_the_detail_card_shows_the_full_text_state_when_and_the_two_buttons(tasks):
+    task = tasks.add(LONG + " #health", date(2026, 11, 19), time(8, 0))
+    text, rows = panel.build_detail(tasks, task.id, TODAY, "week", "health")
+    assert text.splitlines()[0] == LONG + " #health"  # nothing is cut
+    assert "⭕ Not done yet" in text and "When: Tomorrow 08:00" in text
+    (toggle_label, toggle_data), (back_label, back_data) = rows[0][0], rows[1][0]
+    assert toggle_label == "🟢 Mark as done" and back_label == "⬅️ Back to the list"
+    assert panel.decode(toggle_data) == panel.Action("tt", task.id, TODAY, "week", "health")
+    assert panel.decode(back_data) == panel.Action("tb", "", None, "week", "health")
+    assert all(len(d.encode()) <= 64 for _, d in (rows[0][0], rows[1][0]))
+
+
+def test_the_card_follows_the_state_and_covers_recurring_undated_and_linked_tasks(tasks):
+    store = tasks.store
+    store.write_doc("trips/x.md", "---\ndescription: x\n---\n# X\nbody\n")
+    one = tasks.add("Buy bread")
+    tasks.complete(one.id)
+    text, rows = panel.build_detail(tasks, one.id, TODAY)
+    assert "🟢 Done" in text and "No date" in text and rows[0][0][0] == "⭕ Mark as not done"
+    rec = tasks.add("Medication", recurrence=Recurrence.parse("daily"), due_time=time(8, 0), ref="trips/x.md")
+    text, rows = panel.build_detail(tasks, rec.id, TODAY)
+    assert "Repeats: daily 08:00" in text and "Details: trips/x.md" in text and "⭕ Not done yet" in text
+    tasks.complete(rec.id)
+    assert "🟢 Done" in panel.build_detail(tasks, rec.id, TODAY)[0]
+
+
+def test_the_card_of_a_missing_task_is_an_error(tasks):
+    with pytest.raises(TaskError):
+        panel.build_detail(tasks, "zzzz", TODAY)
+
+
+def test_back_callback_roundtrip_and_garbage():
+    assert panel.decode(panel.encode_back("pending", "")) == panel.Action("tb", "", None, "pending", "")
+    assert panel.decode("tb::::x:") is None and panel.decode("tt:a1b2:20261118:q:") is None

@@ -657,30 +657,41 @@ def todo_env(env):
     return SimpleNamespace(env=env, tasks=tasks, handlers=handlers)
 
 
-def test_todo_command_sends_the_panel_and_a_tap_toggles_and_redraws_it(todo_env):
+def test_todo_command_sends_the_panel_a_tap_opens_the_card_and_the_card_toggles_and_goes_back(todo_env):
     from datetime import date as _date
-    task = todo_env.tasks.add("Replace the IoT module", _date(2026, 11, 18))
+    long_text = "Replace the IoT module of the laundry room and test the new firmware with the supplier"
+    task = todo_env.tasks.add(long_text, _date(2026, 11, 18))
     env = todo_env.env
     ctx = SimpleNamespace(bot=object(), args=[])
     run(todo_env.handlers.on_todo(make_update(text="/todo"), ctx))
     chat, text, rows = env.gw.panels[0]
-    assert chat == ALLOWED and rows[0][0][0] == "⭕ Replace the IoT module"
-    run(todo_env.handlers.on_task_toggle(make_query(rows[0][0][1]), env.ctx))
+    assert chat == ALLOWED and rows[0][0][0].endswith("…")  # the list button is cut ...
+    run(todo_env.handlers.on_task_action(make_query(rows[0][0][1]), env.ctx))  # ... tapping it opens the card
+    card, card_rows = env.gw.edits[-1][2], env.gw.edits[-1][3]
+    assert env.gw.edits[-1][1] == 900 and card.startswith(long_text) and "Not done yet" in card  # full text
+    assert [r[0][0] for r in card_rows] == ["🟢 Mark as done", "⬅️ Back to the list"]
+    assert [t.id for t in todo_env.tasks.load().pending] == [task.id]  # opening changes nothing
+    run(todo_env.handlers.on_task_action(make_query(card_rows[0][0][1]), env.ctx))  # check it off
     assert env.gw.answers[-1][1].startswith("🟢 Completed")
-    assert env.gw.edits[-1][1] == 900 and env.gw.edits[-1][3][0][0][0] == "🟢 Replace the IoT module"
-    run(todo_env.handlers.on_task_toggle(make_query(rows[0][0][1]), env.ctx))  # the same button undoes it
-    assert env.gw.answers[-1][1].startswith("⭕ Reopened")
+    card, card_rows = env.gw.edits[-1][2], env.gw.edits[-1][3]
+    assert "🟢 Done" in card and card_rows[0][0][0] == "⭕ Mark as not done"  # stays on the card
+    run(todo_env.handlers.on_task_action(make_query(card_rows[0][0][1]), env.ctx))  # the same button undoes it
+    assert env.gw.answers[-1][1].startswith("⭕ Reopened") and "Not done yet" in env.gw.edits[-1][2]
     assert [t.id for t in todo_env.tasks.load().pending] == [task.id]
+    run(todo_env.handlers.on_task_action(make_query(card_rows[1][0][1]), env.ctx))  # back to the list
+    assert "Tap a task to open it" in env.gw.edits[-1][2] and env.gw.edits[-1][3][0][0][0].startswith("⭕")
 
 
 def test_tap_from_a_stranger_or_garbage_or_missing_task_does_nothing_harmful(todo_env):
     env = todo_env.env
-    run(todo_env.handlers.on_task_toggle(make_query("tk:a1b2:20261118:t:", user_id=999), env.ctx))
+    run(todo_env.handlers.on_task_action(make_query("tk:a1b2:20261118:t:", user_id=999), env.ctx))
     assert env.gw.answers == [] and env.gw.edits == []
-    run(todo_env.handlers.on_task_toggle(make_query("garbage"), env.ctx))
+    run(todo_env.handlers.on_task_action(make_query("garbage"), env.ctx))
     assert env.gw.answers == [("cb1", "")] and env.gw.edits == []
-    run(todo_env.handlers.on_task_toggle(make_query("tk:zzzz:20261118:t:"), env.ctx))
-    assert "no longer exists" in env.gw.answers[-1][1]
+    run(todo_env.handlers.on_task_action(make_query("tk:zzzz:20261118:t:"), env.ctx))
+    assert "no longer exists" in env.gw.answers[-1][1] and env.gw.edits == []
+    run(todo_env.handlers.on_task_action(make_query("tt:zzzz:20261118:t:"), env.ctx))
+    assert "no longer exists" in env.gw.answers[-1][1] and env.gw.edits == []
 
 
 def test_panel_follows_the_agent_reply_when_it_listed_tasks(todo_env):
