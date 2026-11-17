@@ -11,11 +11,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+from storage import markdown as md
 
 MAX_LINES = 300  # acima disso, avisa para dividir o documento
-
-_FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 
 _SECRET_PATTERNS = {
     "chave sk-": re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
@@ -53,18 +51,11 @@ class WriteResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def parse_frontmatter(content: str) -> tuple[dict, str]:
-    """Devolve (metadados, corpo). Metadados vazios se não houver frontmatter."""
-    match = _FRONTMATTER.match(content)
-    if not match:
-        return {}, content
+def _parse(content: str) -> tuple[dict, str]:
     try:
-        meta = yaml.safe_load(match.group(1)) or {}
-    except yaml.YAMLError as exc:
-        raise StoreError(f"Frontmatter inválido: {exc}") from exc
-    if not isinstance(meta, dict):
-        raise StoreError("Frontmatter deve ser um mapa chave: valor")
-    return meta, content[match.end():]
+        return md.parse_frontmatter(content)
+    except md.MarkdownError as exc:
+        raise StoreError(str(exc)) from exc
 
 
 class MemoryStore:
@@ -101,6 +92,10 @@ class MemoryStore:
 
     # ---- leitura ----------------------------------------------------------
 
+    def list_paths(self) -> list[str]:
+        """Caminhos relativos de todos os .md, incluindo index.md."""
+        return [self._rel(p) for p in self._iter_docs()]
+
     def list_docs(self) -> list[Doc]:
         """Lista os documentos (exceto index.md) com a `description` de cada um."""
         docs = []
@@ -109,7 +104,7 @@ class MemoryStore:
             if rel == "index.md":
                 continue
             try:
-                meta, _ = parse_frontmatter(p.read_text(encoding="utf-8"))
+                meta, _ = _parse(p.read_text(encoding="utf-8"))
             except StoreError:
                 meta = {}
             docs.append(Doc(rel, str(meta.get("description", "")).strip()))
@@ -140,7 +135,7 @@ class MemoryStore:
     def write_doc(self, rel_path: str, content: str) -> WriteResult:
         full = self._resolve(rel_path)
 
-        meta, body = parse_frontmatter(content)
+        meta, body = _parse(content)
         description = str(meta.get("description", "")).strip()
         if not description:
             raise StoreError("O frontmatter precisa de `description:` com uma linha")
