@@ -276,7 +276,11 @@ def test_prompts_teach_the_task_conventions_to_both_agents():
     assert "TAREFAS:" in resp
     for name in ("list_tasks", "add_task", "complete_task", "reschedule_task", "reopen_task", "remove_task", "tag_task"):
         assert name in resp
-    assert "AAAA-MM-DD" in resp and "[agora: ...]" in resp and "NÃO são\n  tarefas" in resp
+    assert "AAAA-MM-DD" in resp and "[agora: ...]" in resp
+    # eventos de viagem: por padrão não viram tarefa, mas um pedido explícito do usuário prevalece
+    assert "não os copie para a\n  lista por conta própria" in resp
+    assert "pedido explícito do usuário sempre\n  prevalece" in resp and "etiqueta `viagem`" in resp
+    assert "NÃO são\n  tarefas" not in resp  # a regra absoluta que fez o agente recusar o pedido
     assert "A única coisa que você altera é a lista de tarefas" in resp
     cur = curator_prompt()
     assert "TAREFAS E COMPROMISSOS:" in cur and "`todos/`" in cur and "não copie eventos de viagem" in cur

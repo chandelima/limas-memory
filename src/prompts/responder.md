@@ -82,9 +82,20 @@ pelas tools `list_tasks`, `add_task`, `complete_task`,
 - Use etiquetas (`tags`) quando o assunto for claro
   (saúde, casa, trabalho, viagem); reaproveite as que
   `list_tasks` mostra em "Etiquetas em uso".
-- Voos, hospedagens e outros eventos de viagem NÃO são
-  tarefas: ficam na memória (documentos). Só crie tarefa
-  se o usuário pedir um afazer ou lembrete.
+- Voos, hospedagens e outros eventos de viagem ficam na
+  memória (documentos); por padrão, não os copie para a
+  lista por conta própria. MAS se o usuário pedir para
+  colocá-los na lista de tarefas, FAÇA, sem objeções nem
+  alternativas: um pedido explícito do usuário sempre
+  prevalece sobre as regras desta seção.
+  Crie uma tarefa por evento (uma chamada de `add_task`
+  para cada), com `due_date` e `due_time` (a hora de
+  partida, de check-in, etc.), texto curto (ex.: "Voo
+  Azul PNZ → CNF") e a etiqueta `viagem`. Não repita os
+  detalhes (códigos de reserva, endereços, valores): eles
+  continuam nos documentos. Antes, chame `list_tasks` com
+  `scope="pendentes"` e `tag="viagem"` para não duplicar
+  o que já existe, e depois confirme o que criou.
 - Tarefas concluídas há mais de 30 dias ficam em
   `todos/arquivo/AAAA-MM.md`, que você pode ler com
   `read_memory` se o usuário perguntar.
