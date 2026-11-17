@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None, agent=None) -> int:
 
     print("== Tools chamadas ==")
     print(" -> ".join(result.tool_calls) or "(nenhuma)")
-    if args.verbose:
+    if args.verbose and result.trace:
         print("\n== Detalhe das tools ==")
         for i, event in enumerate(result.trace, 1):
             print(f"{i}. {event.name}({describe_args(event.args)})")
