@@ -54,6 +54,7 @@ from telegram_gateway import TELEGRAM_LIMIT, TYPING_INTERVAL, TelegramGateway, s
 log = get_logger("bot")
 
 WATCH_INTERVAL = 30  # seconds between inactivity checks
+NETWORK_TIMEOUT = 20  # seconds for each call to the Telegram API (the library default is 5)
 SHUTDOWN_WAIT = 30  # maximum wait for a running curation on shutdown
 RECOVERY_MAX_AGE = timedelta(hours=24)  # unanswered messages older than this are discarded
 
@@ -446,7 +447,13 @@ async def post_shutdown(app: Application) -> None:
 def build_application(token: str, handlers: BotHandlers, service) -> Application:
     # concurrent_updates: without it the library handles one message at a time, and a slow
     # file would hold up even the recording and the "typing..." of the next message.
+    # Timeouts above the library's 5 s default: on a slow or unstable link (a home server, a VPN)
+    # a few seconds of latency should not turn into "TimedOut" for every message and log batch.
     app = (Application.builder().token(token).concurrent_updates(True)
+           .connect_timeout(NETWORK_TIMEOUT).read_timeout(NETWORK_TIMEOUT).write_timeout(NETWORK_TIMEOUT)
+           .pool_timeout(NETWORK_TIMEOUT)
+           .get_updates_connect_timeout(NETWORK_TIMEOUT).get_updates_read_timeout(NETWORK_TIMEOUT + 10)
+           .get_updates_write_timeout(NETWORK_TIMEOUT).get_updates_pool_timeout(NETWORK_TIMEOUT)
            .post_init(post_init).post_shutdown(post_shutdown).build())
     app.bot_data["service"] = service
     app.bot_data["handlers"] = handlers

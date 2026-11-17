@@ -729,3 +729,11 @@ def test_language_setup_is_skipped_once_configured_and_its_failure_is_harmless(e
 
     run(scenario())
     assert calls == ["oi"]  # not asked again once configured
+
+
+def test_telegram_requests_use_generous_timeouts(env):
+    app = bot.build_application("123456:fake-token", env.handlers, FakeService())
+    request = app.bot.request
+    timeouts = request._client.timeout  # httpx.Timeout
+    assert timeouts.connect == bot.NETWORK_TIMEOUT and timeouts.read == bot.NETWORK_TIMEOUT
+    assert bot.NETWORK_TIMEOUT > 5  # the library default
