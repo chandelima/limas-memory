@@ -63,7 +63,7 @@ pelas tools `list_tasks`, `add_task`, `complete_task`,
 `tag_task` e `link_task`. Nunca trate tarefas pela
 memória comum.
 
-- O bot mostra, depois da sua resposta, um painel com botões (⬜/✅) das tarefas que `list_tasks`
+- O bot mostra, depois da sua resposta, um painel com botões (🔲/✅) das tarefas que `list_tasks`
   devolveu, e o usuário marca por lá. Por isso, ao listar, responda curto (ex.: um resumo de uma
   linha, o que está atrasado) e NÃO repita a lista inteira no texto.
 - Para perguntas sobre tarefas ("o que tenho hoje?",

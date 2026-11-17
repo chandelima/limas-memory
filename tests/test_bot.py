@@ -665,12 +665,12 @@ def test_todo_command_sends_the_panel_and_a_tap_toggles_and_redraws_it(todo_env)
     ctx = SimpleNamespace(bot=object(), args=[])
     run(todo_env.handlers.on_todo(make_update(text="/todo"), ctx))
     chat, text, rows = env.gw.panels[0]
-    assert chat == ALLOWED and rows[0][0][0] == "⬜ Trocar módulo IoT"
+    assert chat == ALLOWED and rows[0][0][0] == "🔲 Trocar módulo IoT"
     run(todo_env.handlers.on_task_toggle(make_query(rows[0][0][1]), env.ctx))
     assert env.gw.answers[-1][1].startswith("✅ Concluída")
     assert env.gw.edits[-1][1] == 900 and env.gw.edits[-1][3][0][0][0] == "✅ Trocar módulo IoT"
     run(todo_env.handlers.on_task_toggle(make_query(rows[0][0][1]), env.ctx))  # o mesmo botão desfaz
-    assert env.gw.answers[-1][1].startswith("⬜ Reaberta")
+    assert env.gw.answers[-1][1].startswith("🔲 Reaberta")
     assert [t.id for t in todo_env.tasks.load().pending] == [task.id]
 
 

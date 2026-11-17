@@ -1,4 +1,4 @@
-"""Painel de tarefas com botões no Telegram: ⬜ pendente / ✅ concluída; tocar alterna.
+"""Painel de tarefas com botões no Telegram: 🔲 pendente / ✅ concluída; tocar alterna.
 
 O painel é montado direto do arquivo de tarefas (sem modelo). O estado de cada botão é
 decidido na hora do toque (não no texto do botão), então um painel antigo nunca desfaz ou
@@ -32,7 +32,7 @@ class PanelItem:
     when: str = ""  # prefixo curto: data/hora
 
     def label(self) -> str:
-        mark = "✅" if self.done else "⬜"
+        mark = "✅" if self.done else "🔲"
         label = f"{mark} {self.when + ' ' if self.when else ''}{self.text}"
         return label if len(label) <= LABEL_MAX else label[: LABEL_MAX - 1] + "…"
 

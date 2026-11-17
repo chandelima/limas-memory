@@ -155,7 +155,7 @@ class BotHandlers:
         task_id, on, scope, tag = parsed
         try:
             text, done = await asyncio.to_thread(panel.toggle, self.tasks, task_id, on)
-            notice = f"{'✅ Concluída' if done else '⬜ Reaberta'}: {text}"
+            notice = f"{'✅ Concluída' if done else '🔲 Reaberta'}: {text}"
         except TaskError as exc:
             notice = f"Não deu: {exc}"
         except Exception:  # noqa: BLE001

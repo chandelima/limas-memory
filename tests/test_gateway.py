@@ -163,10 +163,10 @@ def test_buttons_are_sent_edited_and_answered_through_the_bot():
             calls.append(("answer", cid, text))
 
     gw = TelegramGateway(B())
-    rows = [[("⬜ Tarefa", "tk:a1b2:20261118:h:")]]
+    rows = [[("🔲 Tarefa", "tk:a1b2:20261118:h:")]]
     assert asyncio.run(gw.send_buttons(1, "Painel", rows)) == 77
     asyncio.run(gw.edit_buttons(1, 77, "Painel", rows))
     asyncio.run(gw.answer_callback("cb", "feito"))
     keyboard = calls[0][1]["reply_markup"].inline_keyboard
-    assert keyboard[0][0].text == "⬜ Tarefa" and keyboard[0][0].callback_data == "tk:a1b2:20261118:h:"
+    assert keyboard[0][0].text == "🔲 Tarefa" and keyboard[0][0].callback_data == "tk:a1b2:20261118:h:"
     assert calls[1][0] == "edit" and calls[2] == ("answer", "cb", "feito")
