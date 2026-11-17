@@ -21,7 +21,8 @@ COPY src ./src
 # Data outside the image: /memory (the memory git repository) and /data (conversation history and briefing state).
 ENV MEMORY_DIR=/memory \
     CONVERSATION_FILE=/data/conversation.json \
-    BRIEFING_STATE_FILE=/data/briefing.json
+    BRIEFING_STATE_FILE=/data/briefing.json \
+    LANGUAGE_FILE=/data/language.json
 
 RUN useradd --create-home --uid 1000 limas && mkdir -p /data /memory && chown limas /data /memory
 USER limas

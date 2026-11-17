@@ -47,6 +47,11 @@ Telegram ──► bot ──► Chat Agent ──► reads memory/ ──► re
   rather than becoming tasks.
 - **Morning briefing**: every day at `BRIEFING_TIME` the bot sends overdue, today's and upcoming tasks (nothing if
   there is nothing to say). If the bot was down at that time, it catches up until noon.
+- **Your language**: the code only knows English messages. On your first message the bot asks the model which
+  language you write in and, if it is not English, to translate every fixed message (help, errors, task panel,
+  briefing, weekday names…) into it, as JSON. The result is saved in `data/language.json`. Messages added by newer
+  versions of the app are translated on demand: English is shown right away and the missing keys are translated in
+  the background and saved. To change the language, delete the file; it is rebuilt from the next message.
 - **Logging**: console logs plus an optional Telegram channel that receives warnings, errors, and start/stop
   notices, and the Curator's reports for automatic runs. Secrets (bot token, API keys, git token) are masked in all
   destinations, and logs never contain the text of your messages or of the memory.
@@ -115,7 +120,7 @@ All settings are environment variables (`.env` is loaded automatically). See `.e
 | `LOG_CHANNEL_ID` | off | Telegram channel for logs (`-100…` or `@name`); the bot must be a channel **admin** that can post |
 | `LOG_CHANNEL_LEVEL` | `WARNING` | Minimum level sent to the channel |
 | `LOG_CHANNEL_HEADER` | empty | Text on top of each batch, for shared channels |
-| `MEMORY_DIR`, `CONVERSATION_FILE`, `BRIEFING_STATE_FILE` | `./memory`, `./data/conversation.json`, `./data/briefing.json` | Locations |
+| `MEMORY_DIR`, `CONVERSATION_FILE`, `BRIEFING_STATE_FILE`, `LANGUAGE_FILE` | `./memory`, `./data/conversation.json`, `./data/briefing.json`, `./data/language.json` | Locations |
 
 ## Docker
 
@@ -148,6 +153,7 @@ Layout:
 src/
   bot.py, telegram_gateway.py   Telegram handlers and the thin wrapper around the Telegram API
   chatflow.py                   conversation flow: ingest → respond → curate → sync
+  i18n.py                       fixed messages: English catalog + the user's language (data/language.json)
   chat_agent/, curator/         the two agents (prompts in src/prompts/*.md)
   storage/                      MemoryStore (path-confined, Markdown only), index, git
   tasks/                        task store, tools, button panel

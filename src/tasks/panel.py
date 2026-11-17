@@ -10,6 +10,7 @@ callback_data: `tk:<id>:<YYYYMMDD>:<scope>:<tag>` (fits in Telegram's 64 bytes).
 from dataclasses import dataclass
 from datetime import date, time
 
+from i18n import t
 from tasks import model
 from tasks.format import day_short
 from tasks.model import TaskError, fmt_time
@@ -20,7 +21,6 @@ _SCOPE_NAMES = {v: k for k, v in PANEL_SCOPES.items()}
 MAX_BUTTONS = 40
 LABEL_MAX = 56
 PREFIX = "tk"
-TITLE = "Tap a task to check or uncheck it:"
 
 
 @dataclass
@@ -41,7 +41,7 @@ class PanelItem:
 
 def day_name(day: date, today: date) -> str:
     delta = (day - today).days
-    return {0: "Today", 1: "Tomorrow", -1: "Yesterday"}.get(delta) or f"{day:%d/%m}"
+    return {0: t("day_today"), 1: t("day_tomorrow"), -1: t("day_yesterday")}.get(delta) or f"{day:%d/%m}"
 
 
 def _prefix(item: PanelItem, today: date, multi_day: bool) -> str:
@@ -111,13 +111,13 @@ def build_panel(tasks: TaskStore, scope: str = "today", tag: str = "") -> tuple[
     """(text, button rows [(label, callback_data)]). Empty rows if there are no tasks."""
     items, total = build_items(tasks, scope, tag)
     today = tasks.today()
-    where = {"today": "today and the next days", "week": "next 7 days", "pending": "pending"}[scope]
-    head = f"Tasks ({where}, {day_short(today)})" + (f" #{model.normalize_tag(tag)}" if tag else "")
+    where = t(f"panel_where_{scope}")
+    head = t("panel_head", where=where, day=day_short(today)) + (f" #{model.normalize_tag(tag)}" if tag else "")
     if not items:
-        return f"{head}: no tasks.", []
-    text = f"{head}\n{TITLE}"
+        return t("panel_none", head=head), []
+    text = f"{head}\n{t('panel_title')}"
     if total > len(items):
-        text += f"\n(showing {len(items)} of {total})"
+        text += "\n" + t("panel_showing", shown=len(items), total=total)
     return text, [[(it.label(), encode(it, scope, tag))] for it in items]
 
 
@@ -136,4 +136,4 @@ def toggle(tasks: TaskStore, task_id: str, on: date) -> tuple[str, bool]:
     if done := next((c for c in tl.done if c.id == task_id), None):
         tasks.reopen(task_id)
         return done.text, False
-    raise TaskError("that task no longer exists")
+    raise TaskError(t("task_gone"))

@@ -34,6 +34,7 @@ from telegram.ext import (Application, CallbackQueryHandler, ChatMemberHandler, 
                           MessageHandler, filters)
 
 import config
+import i18n
 from applog import LogShipper, configure_logging, get_logger, parse_channel_id
 from attachments import reader
 from attachments.registry import AttachmentRegistry
@@ -42,6 +43,7 @@ from briefing import BriefingScheduler, parse_briefing_time
 from chat_agent.agent import build_chat_agent, default_read_tools
 from chatflow import Conversation, build_service, describe_outcome
 from conversation.log import READING, ConversationLog
+from i18n import t
 from storage.store import MemoryStore
 from tasks import panel
 from tasks.model import TaskError
@@ -55,17 +57,15 @@ WATCH_INTERVAL = 30  # seconds between inactivity checks
 SHUTDOWN_WAIT = 30  # maximum wait for a running curation on shutdown
 RECOVERY_MAX_AGE = timedelta(hours=24)  # unanswered messages older than this are discarded
 
-HELP = ("You can just talk to me.\n/status shows the memory state.\n"
-        "/curate processes what is pending now.\n/todo shows the tasks with buttons.")
-FILE_NOTICE = "Got the file, reading..."
-RECOVERY_NOTICE = "I'm back after a restart and will answer the messages that were left pending."
-ERROR_REPLY = "I had a problem answering right now. Try again in a moment."
 
-COMMANDS = [
-    BotCommand("status", "Show the memory state and the pending messages"),
-    BotCommand("todo", "List the tasks with buttons to check and uncheck them"),
-    BotCommand("curate", "Process the pending messages into the memory now"),
-]
+
+def commands() -> list[BotCommand]:
+    """The menu of commands, in the user's language (see i18n)."""
+    return [
+        BotCommand("status", t("cmd_status")),
+        BotCommand("todo", t("cmd_todo")),
+        BotCommand("curate", t("cmd_curate")),
+    ]
 
 
 class BotHandlers:
@@ -79,6 +79,7 @@ class BotHandlers:
         gateway_factory=TelegramGateway,
         briefing: BriefingScheduler | None = None,
         tasks: TaskStore | None = None,
+        ensure_language=None,
     ):
         self.conversation = conversation
         self.allowed_user_id = allowed_user_id
@@ -89,6 +90,8 @@ class BotHandlers:
         self.briefing = briefing  # morning briefing; None = disabled
         self.tasks = tasks  # task panel with buttons; None = disabled
         self._lock = asyncio.Lock()  # one message at a time: the history is sequential
+        self.ensure_language = ensure_language  # sets the user's language up from a message (see i18n)
+        self._language_task: asyncio.Task | None = None
 
     def _authorized(self, update: Update) -> bool:
         user, chat = update.effective_user, update.effective_chat
@@ -107,7 +110,7 @@ class BotHandlers:
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self._authorized(update):
-            await self.gateway_factory(context.bot).send_text(update.effective_chat.id, f"Hello! {HELP}")
+            await self.gateway_factory(context.bot).send_text(update.effective_chat.id, t("hello", help=t("help")))
 
     async def on_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self._authorized(update):
@@ -156,12 +159,12 @@ class BotHandlers:
         task_id, on, scope, tag = parsed
         try:
             text, done = await asyncio.to_thread(panel.toggle, self.tasks, task_id, on)
-            notice = f"{'🟢 Completed' if done else '⭕ Reopened'}: {text}"
+            notice = t("task_completed" if done else "task_reopened", text=text)
         except TaskError as exc:
-            notice = f"Could not: {exc}"
+            notice = t("task_failed", error=exc)
         except Exception:  # noqa: BLE001
             log.exception("error toggling task %s", task_id)
-            notice = "I had a problem updating the task."
+            notice = t("task_update_error")
         await gateway.answer_callback(query.id, notice[:190])
         try:
             new_text, rows = await asyncio.to_thread(panel.build_panel, self.tasks, scope, tag)
@@ -186,7 +189,7 @@ class BotHandlers:
     async def on_unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self._authorized(update):
             await self.gateway_factory(context.bot).send_text(
-                update.effective_chat.id, f"Unknown command. {HELP}")
+                update.effective_chat.id, t("unknown_command", help=t("help")))
 
     # ---- messages: record on arrival, "typing" right away, process in turn ---
 
@@ -198,6 +201,7 @@ class BotHandlers:
             return
         gateway, chat_id = self.gateway_factory(context.bot), update.effective_chat.id
         msg = self.conversation.ingest(text)  # 1. record before anything else
+        self._setup_language(text, gateway)
         async with gateway.typing(chat_id):  # 2. "typing..." right away, even while waiting its turn
             async with self._lock:  # 3. one at a time, in arrival order
                 await self._answer(gateway, chat_id, msg.id)
@@ -218,10 +222,10 @@ class BotHandlers:
         else:
             return
         if not reader.is_supported(mime):
-            await gateway.send_text(chat_id, "For now I only read PDFs and images (JPG, PNG, WebP or GIF).")
+            await gateway.send_text(chat_id, t("file_unsupported"))
             return
         if (item.file_size or 0) > reader.MAX_FILE_BYTES:
-            await gateway.send_text(chat_id, "That file exceeds the 20 MB limit.")
+            await gateway.send_text(chat_id, t("file_too_big"))
             return
 
         att = self.registry.add(  # record the attachment now, so it can be downloaded again if the bot dies
@@ -232,9 +236,28 @@ class BotHandlers:
         stored = self.conversation.ingest(
             reader.format_placeholder(att.ref, filename, att.caption), attachments=[att.id], status=READING)
         async with gateway.typing(chat_id):
-            await gateway.send_text(chat_id, FILE_NOTICE)
+            await gateway.send_text(chat_id, t("file_notice"))
             async with self._lock:
                 await self._read_and_answer(gateway, chat_id, stored.id, att)
+
+    # ---- language of the fixed messages --------------------------------------
+
+    def _setup_language(self, text: str, gateway) -> None:
+        """First messages: have the model detect the user's language and translate the fixed
+        messages (once; in the background, so the reply is not delayed)."""
+        if self.ensure_language is None or i18n.current().configured:
+            return
+        if self._language_task is not None and not self._language_task.done():
+            return
+        self._language_task = asyncio.create_task(self._run_language_setup(text, gateway))
+
+    async def _run_language_setup(self, text: str, gateway) -> None:
+        try:
+            created = await asyncio.to_thread(self.ensure_language, text)
+            if created and self.allowed_user_id is not None:
+                await gateway.register_commands(commands(), self.allowed_user_id)  # menu in the new language
+        except Exception:  # noqa: BLE001 - the language is a nicety: it never breaks the flow
+            log.warning("language setup failed", exc_info=True)
 
     # ---- core (used live and in recovery) ------------------------------------
 
@@ -246,12 +269,12 @@ class BotHandlers:
         except reader.ReaderError as exc:
             log.warning("file %s could not be read: %s", att.ref, exc)
             self.conversation.fail(msg_id, text=reader.format_unreadable(att.ref, att.filename, att.caption))
-            await gateway.send_text(chat_id, f"I could not read that file. {exc}")
+            await gateway.send_text(chat_id, t("file_unreadable", reason=exc))
             return
         except Exception as exc:  # noqa: BLE001 - never exposes internal details in the chat
             log.exception("error downloading file %s", att.ref)
             self.conversation.fail(msg_id, text=reader.format_unreadable(att.ref, att.filename, att.caption))
-            await gateway.send_text(chat_id, "I could not download the file right now. Try again in a moment.")
+            await gateway.send_text(chat_id, t("file_download_failed"))
             return
         self.conversation.set_content(msg_id, reader.format_attachment_message(att.ref, att.filename, att.caption, text))
         await self._answer(gateway, chat_id, msg_id)
@@ -263,7 +286,7 @@ class BotHandlers:
         except Exception as exc:  # noqa: BLE001 - never exposes internal details in the chat
             log.exception("error replying to message %s", msg_id)
             self.conversation.fail(msg_id)
-            await gateway.send_text(chat_id, ERROR_REPLY)
+            await gateway.send_text(chat_id, t("error_reply"))
             return
         if self.verbose:
             self._log_trace(result)
@@ -280,7 +303,7 @@ class BotHandlers:
                 await gateway.send_file(chat_id, att)
             except Exception as exc:  # noqa: BLE001
                 log.warning("error resending %s", att.ref, exc_info=True)
-                await gateway.send_text(chat_id, f"I could not resend the file {att.filename}.")
+                await gateway.send_text(chat_id, t("file_resend_failed", filename=att.filename))
 
     @staticmethod
     def _log_trace(result) -> None:
@@ -312,7 +335,7 @@ class BotHandlers:
         if not fresh:
             return
         log.warning("restart with %d unanswered message(s); resuming", len(fresh))
-        await gateway.send_text(chat_id, RECOVERY_NOTICE)
+        await gateway.send_text(chat_id, t("recovery_notice"))
         for msg in fresh:
             async with gateway.typing(chat_id):
                 async with self._lock:
@@ -325,7 +348,7 @@ class BotHandlers:
         att = self.registry.get(msg.attachments[0]) if self.registry and msg.attachments else None
         if att is None:
             self.conversation.fail(msg.id)
-            await gateway.send_text(chat_id, "I could not resume a file you sent earlier; please send it again.")
+            await gateway.send_text(chat_id, t("file_resume_failed"))
             return
         await self._read_and_answer(gateway, chat_id, msg.id, att)
 
@@ -373,7 +396,7 @@ async def _safe_recover(handlers: BotHandlers, gateway) -> None:
 async def post_init(app: Application) -> None:
     """Register the commands, start the Curator loop and resume unanswered messages."""
     gateway = app.bot_data["gateway"]
-    await gateway.register_commands(COMMANDS, app.bot_data.get("allowed_user_id"))
+    await gateway.register_commands(commands(), app.bot_data.get("allowed_user_id"))
     stop = asyncio.Event()
     app.bot_data["stop"] = stop
     app.bot_data["watcher"] = asyncio.create_task(
@@ -467,6 +490,7 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    i18n.use(i18n.Messages(config.LANGUAGE_FILE, auto_fill=True))  # the user's language, if it is already set up
     memory_store = MemoryStore(args.memory_dir or config.MEMORY_DIR)
     registry = AttachmentRegistry(memory_store)
     tasks = TaskStore(memory_store)  # task list (todos/todo.md), written by code
@@ -486,7 +510,8 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     briefing = (BriefingScheduler(tasks, briefing_time.at, config.BRIEFING_STATE_FILE, log=history, tz=briefing_time.tz)
                 if briefing_time else None)
     handlers = BotHandlers(Conversation(history, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID,
-                           registry, verbose=args.verbose, briefing=briefing, tasks=tasks)
+                           registry, verbose=args.verbose, briefing=briefing, tasks=tasks,
+                           ensure_language=lambda text: i18n.current().ensure(text))
     app = application_factory(config.TELEGRAM_BOT_TOKEN, handlers, service)
     app.bot_data["log_handler"] = log_handler  # sending the logs to the channel starts in post_init
     app.bot_data["log_channel_id"] = log_channel

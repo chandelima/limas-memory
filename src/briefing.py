@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from applog import get_logger
 from conversation.log import ConversationLog
+from i18n import t
 from tasks.format import format_agenda
 from tasks.store import TaskStore
 
@@ -90,7 +91,7 @@ def build_briefing(tasks: TaskStore, today: date | None = None) -> str | None:
     """Text of the briefing, or None if nothing is overdue, due today, upcoming or undated."""
     today = today or tasks.today()
     body = format_agenda(tasks.agenda(today), show_ids=False, max_undated=UNDATED_LIMIT)
-    return f"Good morning!\n\n{body}" if body else None
+    return f"{t('briefing_greeting')}\n\n{body}" if body else None
 
 
 class BriefingScheduler:

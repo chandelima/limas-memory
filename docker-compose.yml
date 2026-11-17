@@ -32,6 +32,7 @@ services:
       MEMORY_DIR: /memory
       CONVERSATION_FILE: /data/conversation.json
       BRIEFING_STATE_FILE: /data/briefing.json
+      LANGUAGE_FILE: /data/language.json
     volumes:
       - memory:/memory   # git repository of the memory
       - data:/data       # conversation.json and briefing.json

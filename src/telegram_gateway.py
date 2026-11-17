@@ -14,6 +14,7 @@ from telegram import BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMa
 from telegram.constants import ChatAction
 
 from applog import get_logger
+from i18n import t
 
 log = get_logger("telegram")
 
@@ -55,7 +56,7 @@ class TelegramGateway:
     async def send_text(self, chat_id: int | str, text: str, *, raw: bool = False) -> None:
         """Send plain text, split at the Telegram limit. `raw=True` leaves the text untouched
         (used for logs, where `**` or `#` may be part of the content)."""
-        for chunk in split_message(text if raw else to_plain(text)) or ["(no reply)"]:
+        for chunk in split_message(text if raw else to_plain(text)) or [t("no_reply")]:
             await self.bot.send_message(chat_id=chat_id, text=chunk)
 
     @staticmethod

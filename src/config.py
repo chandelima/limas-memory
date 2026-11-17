@@ -24,6 +24,10 @@ MEMORY_GIT_TOKEN = os.getenv("MEMORY_GIT_TOKEN", "")
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
+# Language of the fixed bot messages: detected from the user's first message, translated by the
+# model and saved here (delete the file to detect it again)
+LANGUAGE_FILE = Path(os.getenv("LANGUAGE_FILE", ROOT / "data" / "language.json")).resolve()
+
 # Conversation history (JSON, outside memory/ and not versioned) and the Curator trigger
 CONVERSATION_FILE = Path(os.getenv("CONVERSATION_FILE", ROOT / "data" / "conversation.json")).resolve()
 CURATOR_IDLE_SECONDS = float(os.getenv("CURATOR_IDLE_SECONDS", "600"))

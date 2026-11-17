@@ -10,6 +10,7 @@ import pytest
 import applog
 import bot
 import chatflow
+import i18n
 import config
 from attachments import reader
 from attachments.reader import ReaderError
@@ -114,7 +115,7 @@ def test_without_allowed_id_refuses_everyone_and_logs_sender_id(env, caplog):
 def test_agent_error_replies_generically_and_marks_the_message_failed(env, caplog):
     env.state.fail = RuntimeError("internal secret: api key abc")
     run(env.handlers.on_message(make_update(text="hi"), env.ctx))
-    assert env.gw.sent() == [bot.ERROR_REPLY] and "abc" not in env.gw.sent()[0]
+    assert env.gw.sent() == [i18n.t("error_reply")] and "abc" not in env.gw.sent()[0]
     assert stored(env).status == FAILED and env.log.unfinished() == []
     assert "api key abc" in caplog.text  # detail only in the local log (the channel only gets type and message)
 
@@ -228,7 +229,7 @@ def test_pdf_is_registered_and_stored_on_arrival_then_read_and_answered(env):
 
     def read(data, filename, mime):
         msg = stored(env)
-        seen.update(status=msg.status, text=msg.text, notice=bot.FILE_NOTICE in env.gw.sent(),
+        seen.update(status=msg.status, text=msg.text, notice=i18n.t("file_notice") in env.gw.sent(),
                     typing=("typing_on", ALLOWED) in env.gw.events, registered=len(env.registry.all()),
                     download=("download", "TGFILE-A") in env.gw.events)
         return "Hotel Sol, check-in 12/03"
@@ -245,7 +246,7 @@ def test_pdf_is_registered_and_stored_on_arrival_then_read_and_answered(env):
     assert msg.attachments == [att.id] and msg.status == ANSWERED
     assert "Hotel Sol, check-in 12/03" in msg.text and "Caption: trip to Lisbon" in msg.text
     assert "(reading the file...)" not in msg.text
-    assert env.gw.sent() == [bot.FILE_NOTICE, "Got it: Hotel Sol."]
+    assert env.gw.sent() == [i18n.t("file_notice"), "Got it: Hotel Sol."]
     assert "Hotel Sol, check-in 12/03" in env.state.calls[0][-1][1]  # the agent saw the content
 
 
@@ -333,7 +334,7 @@ def test_message_persisted_before_a_crash_is_answered_after_restart(env):
     reborn = Conversation(reborn_log, CurationService(reborn_log, lambda m, c, ch: CurateResult(report="ok"), channel="T"), object())
     env.state.replies = iter(["I'm back!"])
     run(env.make_handlers(conversation=reborn).recover(env.gw))
-    assert env.gw.sent() == [bot.RECOVERY_NOTICE, "I'm back!"]
+    assert env.gw.sent() == [i18n.t("recovery_notice"), "I'm back!"]
     assert reborn_log.unfinished() == [] and reborn_log.get(1).status == ANSWERED
 
 
@@ -344,7 +345,7 @@ def test_recover_resumes_received_ready_and_reading_messages_in_order(env):
     reading = env.conv.ingest(reader.format_placeholder(att.ref, "v.pdf", ""), attachments=[att.id], status=READING)
     env.state.replies = iter(["R1", "R2", "R3"])
     run(env.handlers.recover(env.gw))
-    assert env.gw.sent() == [bot.RECOVERY_NOTICE, "R1", "R2", "R3"]
+    assert env.gw.sent() == [i18n.t("recovery_notice"), "R1", "R2", "R3"]
     assert env.log.unfinished() == [] and ("download", "TGFILE-A") in env.gw.events
     assert "Hotel Sol" in env.log.get(reading.id).text  # the file was downloaded and read again
     assert [e[0] for e in env.gw.events].count("typing_on") == 3
@@ -370,7 +371,7 @@ def test_recover_mixes_fresh_and_stale(env):
 def test_recover_reports_a_file_whose_attachment_is_missing(env):
     env.conv.ingest("[File sent: v.pdf (attachment:deadbeef)]\n(reading the file...)", attachments=["deadbeef"], status=READING)
     run(env.handlers.recover(env.gw))
-    assert env.gw.sent() == [bot.RECOVERY_NOTICE, "I could not resume a file you sent earlier; please send it again."]
+    assert env.gw.sent() == [i18n.t("recovery_notice"), "I could not resume a file you sent earlier; please send it again."]
     assert env.log.get(1).status == FAILED
 
 
@@ -412,7 +413,7 @@ def test_application_wiring(env):
     callbacks = [h.callback for h in registered]
     assert handlers.on_message in callbacks and handlers.on_file in callbacks
     handled = {c for h in registered if hasattr(h, "commands") for c in h.commands}
-    assert {c.command for c in bot.COMMANDS} <= handled
+    assert {c.command for c in bot.commands()} <= handled
     assert app.bot_data["handlers"] is handlers and app.bot_data["allowed_user_id"] == ALLOWED
     assert isinstance(app.bot_data["gateway"], bot.TelegramGateway)
     assert app.bot_data["gateway"].bot is app.bot
@@ -431,7 +432,7 @@ def test_post_init_registers_commands_starts_watcher_and_recovers_pending_messag
     run(lifecycle())
     assert env.gw.registered == (["status", "todo", "curate"], ALLOWED)
     assert service.started and service.finished
-    assert env.gw.sent()[0] == bot.RECOVERY_NOTICE and env.log.unfinished() == []
+    assert env.gw.sent()[0] == i18n.t("recovery_notice") and env.log.unfinished() == []
 
 
 def test_shutdown_cancels_a_recovery_still_in_progress_and_survives_without_init(env):
@@ -692,3 +693,39 @@ def test_panel_follows_the_agent_reply_when_it_listed_tasks(todo_env):
     env.state.trace = [ToolEvent("list_tasks", {"scope": "done"}, "...")]  # no panel for that scope
     run(todo_env.handlers.on_message(make_update(text="and the finished ones?"), env.ctx))
     assert len(env.gw.panels) == 1
+
+
+# ---- language of the fixed messages -------------------------------------------------------------
+
+
+def test_first_message_sets_the_language_up_in_the_background_and_refreshes_the_menu(env):
+    calls = []
+
+    def ensure(text):
+        calls.append(text)
+        return True  # the language file was just created
+
+    handlers = bot.BotHandlers(env.conv, ALLOWED, env.registry, gateway_factory=lambda _b: env.gw, ensure_language=ensure)
+
+    async def scenario():
+        await handlers.on_message(make_update(text="oi, tudo bem?"), env.ctx)
+        await handlers._language_task
+
+    run(scenario())
+    assert calls == ["oi, tudo bem?"] and env.gw.sent() == ["ok"]  # the reply is not held up by the setup
+    assert env.gw.registered == (["status", "todo", "curate"], ALLOWED)  # menu re-registered
+
+
+def test_language_setup_is_skipped_once_configured_and_its_failure_is_harmless(env):
+    calls = []
+    handlers = bot.BotHandlers(env.conv, ALLOWED, env.registry, gateway_factory=lambda _b: env.gw,
+                               ensure_language=lambda text: calls.append(text) or 1 / 0)
+
+    async def scenario():
+        await handlers.on_message(make_update(text="oi"), env.ctx)
+        await handlers._language_task  # the ZeroDivisionError is swallowed (and logged)
+        i18n.current().configured = True
+        await handlers.on_message(make_update(text="de novo"), env.ctx)
+
+    run(scenario())
+    assert calls == ["oi"]  # not asked again once configured

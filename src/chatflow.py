@@ -14,6 +14,7 @@ from conversation.log import ANSWERED, FAILED, READY, RECEIVED, ConversationLog,
 from curator.agent import ToolEvent, build_curator, curate
 from curator.service import CurationService, Outcome, to_chat
 from curator.tools import default_tools, make_store_and_git
+from i18n import t
 
 log = get_logger("chat_agent")
 
@@ -64,30 +65,27 @@ def build_service(
 
 def describe_outcome(outcome: Outcome) -> str:
     if outcome.busy:
-        return "[curator] a curation is already running; wait for it to finish."
+        return t("curator_busy")
     if outcome.error:
-        return f"[curator] failed; {outcome.messages} message(s) stay pending: {outcome.error}"
-    tools = " -> ".join(outcome.result.tool_calls) or "no tools"
-    return (
-        f"[curator] {outcome.messages} message(s) processed ({tools})\n"
-        f"{outcome.result.report}"
-    )
+        return t("curator_failed", count=outcome.messages, error=outcome.error)
+    tools = " -> ".join(outcome.result.tool_calls) or t("curator_no_tools")
+    return t("curator_done", count=outcome.messages, tools=tools, report=outcome.result.report)
 
 
 def describe_status(service: CurationService) -> str:
     pending = len(service.log.pending())
     idle = service.seconds_idle()
-    parts = [f"pending: {pending}"]
+    parts = [t("status_pending", count=pending)]
     in_progress = len(service.log.unfinished())
     if in_progress:
-        parts.append(f"messages in progress: {in_progress}")
+        parts.append(t("status_in_progress", count=in_progress))
     if service.is_running:
-        parts.append("curation running")
+        parts.append(t("status_running"))
     if idle is not None:
-        parts.append(f"idle for {idle:.0f}s (curation after {service.idle_seconds:.0f}s)")
+        parts.append(t("status_idle", seconds=f"{idle:.0f}", limit=f"{service.idle_seconds:.0f}"))
     if service.last_error:
-        parts.append(f"last error: {service.last_error}")
-    return "[status] " + " | ".join(parts)
+        parts.append(t("status_error", error=service.last_error))
+    return t("status_prefix") + " " + " | ".join(parts)
 
 
 def compact_history(messages: list[Message]) -> list[Message]:
@@ -160,7 +158,7 @@ class Conversation:
 
     def curate_now(self) -> str:
         outcome = self.service.run_now()
-        return describe_outcome(outcome) if outcome else "[curator] nothing pending."
+        return describe_outcome(outcome) if outcome else t("curator_nothing")
 
     def status(self) -> str:
         return describe_status(self.service)

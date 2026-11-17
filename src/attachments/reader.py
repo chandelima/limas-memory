@@ -10,6 +10,7 @@ import base64
 from langchain_core.messages import HumanMessage
 
 import config
+from i18n import t
 from llm import get_llm
 
 MAX_FILE_BYTES = 20 * 1024 * 1024  # download limit for files through the Telegram bot
@@ -72,11 +73,11 @@ def _default_llm(mime: str):
 def read_document(data: bytes, filename: str, mime: str, llm=None) -> str:
     """Return the document's transcription (truncated at MAX_TEXT_CHARS)."""
     if not is_supported(mime):
-        raise ReaderError("I only read PDFs and images (JPG, PNG, WebP or GIF).")
+        raise ReaderError(t("reader_unsupported"))
     if not data:
-        raise ReaderError("The file is empty.")
+        raise ReaderError(t("reader_empty"))
     if len(data) > MAX_FILE_BYTES:
-        raise ReaderError("The file exceeds the 20 MB limit.")
+        raise ReaderError(t("reader_too_big"))
     try:
         llm = llm or _default_llm(mime)
     except RuntimeError as exc:  # e.g. missing OPENROUTER_API_KEY (its own message, safe)
@@ -86,11 +87,11 @@ def read_document(data: bytes, filename: str, mime: str, llm=None) -> str:
     except Exception as exc:  # noqa: BLE001 - an API error becomes a message for the user
         hint = ""
         if mime.lower() != PDF_MIME:
-            hint = " The model may not accept images: set DOCUMENT_MODEL to a vision model."
-        raise ReaderError(f"I could not read the file ({type(exc).__name__}).{hint}") from exc
+            hint = t("reader_vision_hint")
+        raise ReaderError(t("reader_failed", error_type=type(exc).__name__) + hint) from exc
     text = reply.text.strip()
     if not text:
-        raise ReaderError("The model returned no text for this file.")
+        raise ReaderError(t("reader_no_text"))
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS].rstrip() + "\n[text truncated: the document is larger than the limit]"
     return text
