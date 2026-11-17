@@ -213,8 +213,8 @@ def test_flush_sends_one_batched_message_without_header_by_default_and_collapses
         handler.emit(record("mesma falha"))
     handler.emit(record("outra falha", logging.ERROR))
     assert run(shipper(handler, sink).flush()) == 1
-    assert len(sink.sent) == 1 and sink.sent[0].startswith("[limas-memory]\n")
-    assert "mesma falha (x3)" in sink.sent[0] and "ERROR bot: outra falha" in sink.sent[0]
+    assert len(sink.sent) == 1 and sink.sent[0].split()[0][0].isdigit()  # sem cabeçalho: começa na hora
+    assert "mesma falha (x3)" in sink.sent[0] and "#ERROR bot: outra falha" in sink.sent[0]
     assert run(shipper(handler, sink).flush()) == 0  # fila vazia: nada a enviar
 
 
