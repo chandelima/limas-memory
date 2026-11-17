@@ -408,7 +408,7 @@ def test_application_wiring(env):
     app = bot.build_application("123456:fake-token", handlers, FakeService())
     assert app.concurrent_updates > 1  # sem isso, um arquivo lento seguraria as mensagens seguintes
     registered = app.handlers[0]
-    assert len(registered) == 6 and registered[-1].callback == handlers.on_unknown
+    assert len(registered) == 7 and registered[-1].callback == handlers.on_unknown
     callbacks = [h.callback for h in registered]
     assert handlers.on_message in callbacks and handlers.on_file in callbacks
     handled = {c for h in registered if hasattr(h, "commands") for c in h.commands}
@@ -602,3 +602,27 @@ def test_post_init_ships_lifecycle_lines_to_the_channel_and_shutdown_flushes(env
     asyncio.run(lifecycle())
     sent = " ".join(t for cid, t in env.gw.texts if cid == -100123)
     assert "bot iniciado" in sent and "bot encerrando" in sent
+
+
+def member_update(chat_type, status, chat_id=-1001234567890, title="Logs"):
+    return SimpleNamespace(
+        my_chat_member=SimpleNamespace(new_chat_member=SimpleNamespace(status=status)),
+        effective_chat=SimpleNamespace(id=chat_id, type=chat_type, title=title),
+    )
+
+
+def test_adding_the_bot_to_a_channel_logs_its_id_for_log_channel_id(env, caplog):
+    caplog.set_level(logging.INFO)
+    run(env.handlers.on_added_to_chat(member_update("channel", "administrator"), env.ctx))
+    assert "LOG_CHANNEL_ID=-1001234567890" in caplog.text and "canal 'Logs'" in caplog.text
+    assert "administrador" not in caplog.text and env.gw.events == []  # não responde nada no chat
+
+
+def test_added_as_plain_member_asks_for_admin_and_removal_or_private_chats_are_ignored(env, caplog):
+    caplog.set_level(logging.INFO)
+    run(env.handlers.on_added_to_chat(member_update("supergroup", "member"), env.ctx))
+    assert "grupo" in caplog.text and "administrador" in caplog.text
+    caplog.clear()
+    run(env.handlers.on_added_to_chat(member_update("channel", "left"), env.ctx))
+    run(env.handlers.on_added_to_chat(member_update("private", "member"), env.ctx))
+    assert caplog.text == ""

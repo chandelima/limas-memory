@@ -30,7 +30,7 @@ from pathlib import Path
 
 from telegram import BotCommand, Update
 from telegram.constants import ChatType
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, ChatMemberHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 import config
 from applog import LogShipper, configure_logging, get_logger, parse_channel_id
@@ -113,6 +113,20 @@ class BotHandlers:
         async with gateway.typing(chat_id):
             report = await asyncio.to_thread(self.conversation.curate_now)
         await gateway.send_text(chat_id, report)
+
+    async def on_added_to_chat(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Bot adicionado a um canal ou grupo: mostra o ID no console, para usar em LOG_CHANNEL_ID
+        (como acontece com o ID de um usuário novo). Só informa; não responde nada no chat."""
+        change = update.my_chat_member
+        chat = update.effective_chat
+        if change is None or chat is None or chat.type == ChatType.PRIVATE:
+            return
+        if change.new_chat_member.status not in ("administrator", "member"):
+            return  # removido ou banido
+        kind = "canal" if chat.type == ChatType.CHANNEL else "grupo"
+        log.info("bot adicionado ao %s '%s'; para enviar os logs para lá, defina LOG_CHANNEL_ID=%s%s",
+                 kind, chat.title or "?", chat.id,
+                 "" if change.new_chat_member.status == "administrator" else " (e torne o bot administrador)")
 
     async def on_unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self._authorized(update):
@@ -349,6 +363,7 @@ def build_application(token: str, handlers: BotHandlers, service) -> Application
     app.bot_data["handlers"] = handlers
     app.bot_data["allowed_user_id"] = handlers.allowed_user_id
     app.bot_data["gateway"] = handlers.gateway_factory(app.bot)
+    app.add_handler(ChatMemberHandler(handlers.on_added_to_chat, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(CommandHandler("start", handlers.on_start))
     app.add_handler(CommandHandler("status", handlers.on_status))
     app.add_handler(CommandHandler("curate", handlers.on_curate))
