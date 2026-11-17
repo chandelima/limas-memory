@@ -19,11 +19,14 @@ import re
 import sys
 from pathlib import Path
 
-from telegram import BotCommand, BotCommandScopeChat, Update
+from telegram import BotCommand, BotCommandScopeChat, ReplyParameters, Update
 from telegram.constants import ChatAction, ChatType
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 import config
+from attachments import reader
+from attachments.registry import AttachmentRegistry
+from attachments.tools import build_attachment_tools
 from chatflow import Conversation, build_service, describe_outcome
 from conversation.log import ConversationLog
 from responder.agent import build_responder, default_read_tools
@@ -64,9 +67,17 @@ def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
 
 
 class BotHandlers:
-    def __init__(self, conversation: Conversation, allowed_user_id: int | None):
+    def __init__(
+        self,
+        conversation: Conversation,
+        allowed_user_id: int | None,
+        registry: AttachmentRegistry | None = None,
+        read_document=reader.read_document,
+    ):
         self.conversation = conversation
         self.allowed_user_id = allowed_user_id
+        self.registry = registry  # sem registro, o bot ignora arquivos
+        self.read_document = read_document
         self._lock = asyncio.Lock()  # uma conversa por vez: o histórico é sequencial
 
     def _authorized(self, update: Update) -> bool:
@@ -92,16 +103,14 @@ class BotHandlers:
         if self._authorized(update):
             await update.message.reply_text(f"Olá! {HELP}")
 
-    async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._authorized(update):
-            return
-        text = (update.message.text or "").strip()
-        if not text:
-            return
+    async def _respond(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, attachments: list[str] | None = None
+    ) -> None:
+        """Passa o texto ao agente de resposta, responde e envia os arquivos que ele pediu."""
         async with self._lock:
             typing = asyncio.create_task(self._keep_typing(update))
             try:
-                result = await asyncio.to_thread(self.conversation.respond, text)
+                result = await asyncio.to_thread(self.conversation.respond, text, attachments)
             except Exception as exc:  # noqa: BLE001 - nunca expõe detalhes internos no chat
                 print(f"[bot] erro ao responder: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
                 await update.message.reply_text("Tive um problema para responder agora. Tente de novo em instantes.")
@@ -109,6 +118,70 @@ class BotHandlers:
             finally:
                 typing.cancel()
         await self._reply(update, result.text)
+        await self._send_files(update, context, result.files)
+
+    async def _send_files(self, update: Update, context: ContextTypes.DEFAULT_TYPE, files: list) -> None:
+        """Reenvia os arquivos pelo file_id, citando a mensagem original quando ela existir."""
+        for att in files:
+            reply_to = ReplyParameters(message_id=att.message_id, allow_sending_without_reply=True)
+            send = context.bot.send_photo if att.kind == "photo" else context.bot.send_document
+            kwargs = {"photo": att.file_id} if att.kind == "photo" else {"document": att.file_id}
+            try:
+                await send(chat_id=update.effective_chat.id, reply_parameters=reply_to, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[bot] erro ao reenviar {att.ref}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                await update.message.reply_text(f"Não consegui reenviar o arquivo {att.filename}.")
+
+    async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        text = (update.message.text or "").strip()
+        if text:
+            await self._respond(update, context, text)
+
+    async def on_file(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Documento ou foto: baixa, lê o conteúdo, registra o anexo e passa ao agente."""
+        if not self._authorized(update) or self.registry is None:
+            return
+        msg = update.message
+        if msg.document:
+            kind, item = "document", msg.document
+            filename = item.file_name or "arquivo"
+            mime = reader.guess_mime(filename, item.mime_type or "")
+        elif msg.photo:
+            kind, item = "photo", msg.photo[-1]  # a maior resolução
+            filename, mime = f"foto-{item.file_unique_id}.jpg", "image/jpeg"
+        else:
+            return
+        if not reader.is_supported(mime):
+            await msg.reply_text("Por enquanto só leio PDF e imagens (JPG, PNG, WebP ou GIF).")
+            return
+        if (item.file_size or 0) > reader.MAX_FILE_BYTES:
+            await msg.reply_text("Esse arquivo passa do limite de 20 MB.")
+            return
+
+        typing = asyncio.create_task(self._keep_typing(update))
+        try:
+            tg_file = await context.bot.get_file(item.file_id)
+            data = bytes(await tg_file.download_as_bytearray())
+            text = await asyncio.to_thread(self.read_document, data, filename, mime)
+        except reader.ReaderError as exc:
+            await msg.reply_text(f"Não consegui ler esse arquivo. {exc}")
+            return
+        except Exception as exc:  # noqa: BLE001
+            print(f"[bot] erro ao baixar o arquivo: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            await msg.reply_text("Não consegui baixar o arquivo agora. Tente de novo em instantes.")
+            return
+        finally:
+            typing.cancel()
+
+        att = self.registry.add(
+            file_id=item.file_id, file_unique_id=item.file_unique_id, kind=kind,
+            chat_id=update.effective_chat.id, message_id=msg.message_id, filename=filename,
+            mime=mime, size=item.file_size or len(data), caption=msg.caption or "",
+        )
+        message = reader.format_attachment_message(att.ref, filename, msg.caption or "", text)
+        await self._respond(update, context, message, [att.id])
 
     async def on_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self._authorized(update):
@@ -200,6 +273,7 @@ def build_application(token: str, handlers: BotHandlers, service) -> Application
     app.add_handler(CommandHandler("status", handlers.on_status))
     app.add_handler(CommandHandler("curate", handlers.on_curate))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.on_message))
+    app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, handlers.on_file))
     app.add_handler(MessageHandler(filters.COMMAND, handlers.on_unknown))  # sempre por último
     app.add_error_handler(on_error)
     return app
@@ -220,14 +294,19 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
                     help="arquivo do histórico (padrão: CONVERSATION_FILE / ./data/conversa.json)")
     ap.add_argument("--idle-seconds", type=float, default=config.CURATOR_IDLE_SECONDS,
                     help="inatividade antes de o Curator processar (padrão: CURATOR_IDLE_SECONDS)")
+    ap.add_argument("--attachments", type=Path, default=None,
+                    help="tabela de anexos (padrão: ATTACHMENTS_FILE / ./data/anexos.json)")
     args = ap.parse_args(argv)
 
     if not config.TELEGRAM_BOT_TOKEN:
         print("Erro: defina TELEGRAM_BOT_TOKEN no ambiente ou no .env (token do @BotFather)", file=sys.stderr)
         return 1
+    registry = AttachmentRegistry(args.attachments or config.ATTACHMENTS_FILE)
+    outbox: list = []  # arquivos que o agente pede para reenviar na resposta atual
     if agent is None:
         try:
-            agent = build_responder(tools=default_read_tools(args.memory_dir))
+            tools = default_read_tools(args.memory_dir) + build_attachment_tools(registry, outbox)
+            agent = build_responder(tools=tools)
         except RuntimeError as exc:
             print(f"Erro: {exc}", file=sys.stderr)
             return 1
@@ -235,7 +314,7 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     configure_logging()
     log = ConversationLog(args.log or config.CONVERSATION_FILE)
     service = build_service(log, args.memory_dir, args.idle_seconds, channel="Telegram")
-    handlers = BotHandlers(Conversation(log, service, agent), config.TELEGRAM_ALLOWED_USER_ID)
+    handlers = BotHandlers(Conversation(log, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID, registry)
     app = application_factory(config.TELEGRAM_BOT_TOKEN, handlers, service)
 
     print(f"Bot iniciado | modelo: {config.OPENROUTER_MODEL} | memória: {args.memory_dir or config.MEMORY_DIR}")

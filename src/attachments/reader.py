@@ -31,8 +31,25 @@ class ReaderError(Exception):
     """Falha ao ler o arquivo; a mensagem é segura para mostrar ao usuário."""
 
 
+_EXTENSIONS = {
+    ".pdf": PDF_MIME, ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".gif": "image/gif",
+}
+
+
 def is_supported(mime: str) -> bool:
     return mime.lower() in SUPPORTED_MIMES
+
+
+def guess_mime(filename: str, mime: str = "") -> str:
+    """Tipo do arquivo: o informado, se for suportado; senão pela extensão (alguns
+    clientes mandam PDF como application/octet-stream)."""
+    if mime and is_supported(mime):
+        return mime.lower()
+    for ext, known in _EXTENSIONS.items():
+        if filename.lower().endswith(ext):
+            return known
+    return mime or ""
 
 
 def build_message(data: bytes, filename: str, mime: str) -> HumanMessage:

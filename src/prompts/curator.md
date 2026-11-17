@@ -89,6 +89,29 @@ CONTRADIÇÕES E HIPÓTESES:
   numa seção `## Hipóteses (não verificadas)`, com data
   e origem. Nunca os coloque na lista de fatos.
 
+ANEXOS:
+
+- Uma mensagem pode ser um arquivo enviado pelo usuário
+  (voucher, comprovante, foto de papel): ela começa com
+  `[Arquivo enviado: nome (anexo:ID)]` e traz o conteúdo
+  extraído do arquivo.
+- O usuário autorizou guardar TUDO o que estiver no
+  arquivo, inclusive identificadores e códigos (reserva,
+  passaporte, cartão, etc.). Grave os dados completos e
+  organizados (por exemplo, um documento por viagem, com
+  datas, locais, voos, hospedagem, códigos e valores), sem
+  omitir campos por serem sensíveis.
+- Registre a referência `anexo:ID` no documento, numa
+  linha de origem exatamente neste formato, para o
+  arquivo poder ser reenviado depois:
+  `Fonte: anexo:ab12cd34 (voucher.pdf, enviado em 2026-11-17)`.
+  Se o documento da viagem já existir, atualize-o e
+  acrescente o novo anexo, sem duplicar.
+- Trechos marcados [ilegível] ou duvidosos não são
+  fatos: registre-os como incertos.
+- Não copie o texto extraído inteiro: organize os dados
+  em seções claras.
+
 FLUXO DE TRABALHO:
 
 1. Use `list_memory` e `search_memory` ANTES de escrever.

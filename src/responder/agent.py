@@ -23,6 +23,7 @@ RECURSION_LIMIT = 25
 class ReplyResult:
     text: str
     trace: list[ToolEvent] = field(default_factory=list)
+    files: list = field(default_factory=list)  # anexos a enviar junto com a resposta
 
 
 def load_system_prompt() -> str:

@@ -4,9 +4,10 @@ Sem nada de interface: recebe texto, registra no histórico, consulta o agente d
 e deixa o Curator trabalhar por inatividade. Quem chama cuida de mostrar o resultado.
 """
 
+from dataclasses import replace
 from pathlib import Path
 
-from conversation.log import ConversationLog
+from conversation.log import ConversationLog, Message
 from curator.agent import build_curator, curate
 from curator.service import CurationService, Outcome, to_chat
 from curator.tools import default_tools
@@ -57,19 +58,44 @@ def describe_status(service: CurationService) -> str:
     return "[status] " + " | ".join(parts)
 
 
-class Conversation:
-    """Uma conversa: histórico + agente de resposta + serviço de curadoria."""
+def compact_history(messages: list[Message], curated_upto: int) -> list[Message]:
+    """Encurta, no histórico do agente de resposta, o conteúdo de arquivos antigos.
 
-    def __init__(self, log: ConversationLog, service: CurationService, agent):
+    Só encurta o que já foi curado (os dados já estão na memória) e nunca a última
+    mensagem. Arquivos ainda pendentes mantêm o texto completo: o Curator só roda depois
+    da inatividade e o agente precisa conseguir responder sobre o arquivo nesse meio tempo.
+    """
+    out = []
+    for i, m in enumerate(messages):
+        if m.attachments and m.id <= curated_upto and i < len(messages) - 1:
+            header = m.text.splitlines()[0]
+            omitted = "(conteúdo omitido do histórico; os dados estão na memória)"
+            m = replace(m, text=f"{header}\n{omitted}")
+        out.append(m)
+    return out
+
+
+class Conversation:
+    """Uma conversa: histórico + agente de resposta + serviço de curadoria.
+
+    `outbox` é a lista que a tool `send_attachment` do agente preenche; os arquivos
+    pedidos numa resposta saem em `ReplyResult.files`."""
+
+    def __init__(self, log: ConversationLog, service: CurationService, agent, outbox: list | None = None):
         self.log = log
         self.service = service
         self.agent = agent
+        self.outbox = outbox if outbox is not None else []
 
-    def respond(self, text: str) -> ReplyResult:
+    def respond(self, text: str, attachments: list[str] | None = None) -> ReplyResult:
         """Registra a fala do usuário, responde (lendo a memória) e registra a resposta."""
-        self.log.append("usuario", text)
-        history = [to_chat(m) for m in self.log.recent(HISTORY_MESSAGES)]
+        self.log.append("usuario", text, attachments=attachments)
+        recent = compact_history(self.log.recent(HISTORY_MESSAGES), self.log.curated_upto)
+        history = [to_chat(m) for m in recent]
+        self.outbox.clear()
         result = reply(history, agent=self.agent)
+        result.files = list(self.outbox)
+        self.outbox.clear()
         self.log.append("assistente", result.text)
         return result
 

@@ -28,7 +28,7 @@ class FakeConversation:
         self.active = 0
         self.max_active = 0
 
-    def respond(self, text):
+    def respond(self, text, attachments=None):
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         time.sleep(0.03)
@@ -195,9 +195,10 @@ def test_application_registers_handlers_in_order_with_command_fallback_last():
     handlers = bot.BotHandlers(FakeConversation(), ALLOWED)
     app = bot.build_application("123456:fake-token", handlers, FakeService())
     registered = app.handlers[0]
-    assert len(registered) == 5
+    assert len(registered) == 6
     assert registered[-1].callback == handlers.on_unknown
-    assert registered[-2].callback == handlers.on_message
+    callbacks = [h.callback for h in registered]
+    assert handlers.on_message in callbacks and handlers.on_file in callbacks
 
 
 def test_watcher_starts_with_the_bot_and_stops_on_shutdown():

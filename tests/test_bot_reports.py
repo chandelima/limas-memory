@@ -31,7 +31,7 @@ class FakeConversation:
     def __init__(self, answer="resposta"):
         self.answer = answer
 
-    def respond(self, text):
+    def respond(self, text, attachments=None):
         return ReplyResult(text=self.answer)
 
     def status(self):
