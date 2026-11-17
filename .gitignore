@@ -4,3 +4,4 @@ __pycache__/
 memory/
 *.log
 compare-*
+data/

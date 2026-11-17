@@ -108,7 +108,7 @@ def test_chat_cli_loop_keeps_history_and_exits(store, capsys):
     model = ScriptedModel(responses=script)
     agent = build_responder(llm=model, tools=build_read_tools(store))
     inputs = iter(["olá", "", "valeu", "sair"])
-    code = chat_cli.main([], agent=agent, read=lambda _: next(inputs))
+    code = chat_cli.main([], agent=agent, read=lambda _: next(inputs), start_watcher=False)
     out = capsys.readouterr().out
     assert code == 0
     assert "IA: Oi!" in out and "IA: Tchau!" in out
@@ -118,7 +118,7 @@ def test_chat_cli_verbose_shows_memory_calls(store, capsys):
     script = [tool_call("list_memory", {}, "1"), AIMessage(content="Achei.")]
     agent = build_responder(llm=ScriptedModel(responses=script), tools=build_read_tools(store))
     inputs = iter(["o que sei de café?", "sair"])
-    chat_cli.main(["--verbose"], agent=agent, read=lambda _: next(inputs))
+    chat_cli.main(["--verbose"], agent=agent, read=lambda _: next(inputs), start_watcher=False)
     assert "[memória] list_memory()" in capsys.readouterr().out
 
 

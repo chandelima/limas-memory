@@ -23,3 +23,7 @@ MEMORY_GIT_USER_EMAIL = os.getenv("MEMORY_GIT_USER_EMAIL", "")
 MEMORY_GIT_TOKEN = os.getenv("MEMORY_GIT_TOKEN", "")
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
+# Histórico da conversa (JSON, fora de memory/ e não versionado) e gatilho do Curator
+CONVERSATION_FILE = Path(os.getenv("CONVERSATION_FILE", ROOT / "data" / "conversa.json")).resolve()
+CURATOR_IDLE_SECONDS = float(os.getenv("CURATOR_IDLE_SECONDS", "600"))
