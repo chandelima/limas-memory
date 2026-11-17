@@ -256,9 +256,9 @@ def test_reschedule_a_recurring_task_explains_what_to_do(tools, tasks):
     assert "remova-a e crie outra" in call(tools, "reschedule_task", task_id=rec.id, due_date="2026-11-20")
 
 
-def test_the_seven_tools_have_descriptions_for_the_model(tools):
+def test_the_eight_tools_have_descriptions_for_the_model(tools):
     assert set(tools) == {"list_tasks", "add_task", "complete_task", "reschedule_task", "reopen_task",
-                          "remove_task", "tag_task"}
+                          "remove_task", "tag_task", "link_task"}
     assert all(t.description for t in tools.values())
 
 

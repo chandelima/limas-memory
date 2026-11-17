@@ -58,9 +58,17 @@ FORMATO DOS DOCUMENTOS:
 - O canal só pode ser registrado se a entrada trouxer
   `CANAL:` com um valor conhecido. Nunca deduza ou
   invente o canal; com "desconhecido", omita-o.
-- Crie links Markdown apenas entre assuntos realmente
-  relacionados. Não force links entre assuntos sem
-  relação.
+- SEMPRE QUE POSSÍVEL, referencie outros documentos da
+  memória com links Markdown relativos, por exemplo
+  `[Viagem a Petrolina](../viagens/petrolina-2027.md)`.
+  Documentos de assuntos relacionados (a viagem e a
+  pessoa, o projeto e a preferência, etc.) devem se ligar
+  entre si, nos dois sentidos, e a primeira menção a um
+  assunto que já tem documento próprio deve virar um
+  link. Use `list_memory` e `search_memory` para achar os
+  alvos antes de escrever. Nunca invente links para
+  documentos que não existem e não force ligação entre
+  assuntos sem relação.
 - Use datas absolutas (AAAA-MM-DD). Converta expressões
   relativas ("ano que vem", "ontem") usando a DATA E
   HORA ATUAIS fornecidas na entrada. Nunca escreva

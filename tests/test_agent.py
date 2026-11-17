@@ -120,7 +120,7 @@ def test_format_input_includes_channel_with_default():
 def test_prompt_forbids_inventing_channel_and_forcing_links():
     prompt = load_system_prompt()
     assert "Nunca deduza ou\n  invente o canal" in prompt
-    assert "Não force links" in prompt
+    assert "não force ligação entre" in prompt  # linkar sempre que possível, mas nunca à força
     assert "UMA vez por documento" in prompt
 
 

@@ -4,7 +4,10 @@ Camada fina sobre o TaskStore: erros de validação viram "ERRO: ..." para o age
 As mudanças valem na hora (o arquivo é gravado por código) e entram no próximo commit.
 """
 
+import math
+import re
 import unicodedata
+from datetime import date, time
 
 from langchain_core.tools import BaseTool, tool
 
@@ -17,6 +20,7 @@ from tasks.store import TaskStore
 
 SCOPES = ("hoje", "semana", "pendentes", "recorrentes", "concluidas")
 DONE_LIMIT = 20
+PAGE_SIZE = 30  # tarefas por página em list_tasks("pendentes")
 
 
 def _norm(text: str) -> str:
@@ -33,12 +37,14 @@ def _time_or_none(value: str):
 
 def build_task_tools(tasks: TaskStore) -> list[BaseTool]:
     @tool
-    def list_tasks(scope: str = "hoje", tag: str = "") -> str:
+    def list_tasks(scope: str = "hoje", tag: str = "", month: str = "", page: int = 1) -> str:
         """Lista tarefas COM O ID de cada uma (use o ID para concluir, reagendar, etc.).
         `scope`: 'hoje' (atrasadas, hoje com as recorrentes e os próximos 3 dias), 'semana'
         (próximos 7 dias), 'pendentes' (todas as abertas), 'recorrentes' ou 'concluidas'
-        (as últimas 20). `tag` filtra por etiqueta (ex.: 'saúde'). Chame antes de responder
-        perguntas sobre tarefas e antes de concluir ou alterar uma."""
+        (as últimas 20). `tag` filtra por etiqueta (ex.: 'saúde'). Em 'pendentes', `month`
+        (AAAA-MM) filtra pelo mês de vencimento e `page` pagina (30 por página; o rodapé diz
+        quantas há). Chame antes de responder perguntas sobre tarefas e antes de concluir ou
+        alterar uma."""
         try:
             wanted = _norm(scope) or "hoje"
             if wanted not in SCOPES:
@@ -47,12 +53,27 @@ def build_task_tools(tasks: TaskStore) -> list[BaseTool]:
             header = f"Hoje é {day_short(today)}, {today:%Y-%m-%d}."
             if wanted in ("hoje", "semana"):
                 agenda = tasks.agenda(horizon_days=3 if wanted == "hoje" else 7, tag=tag)
-                body = format_agenda(agenda, show_ids=True, max_undated=50) or "Nenhuma tarefa para o período."
+                body = (format_agenda(agenda, show_ids=True, max_undated=50, max_overdue=50)
+                        or "Nenhuma tarefa para o período.")
             else:
                 tl = tasks.load()
                 keep = (lambda items: [i for i in items if model.normalize_tag(tag) in i.tags]) if tag else (lambda items: items)
                 if wanted == "pendentes":
-                    body = format_pending(keep(tl.pending))
+                    pending = keep(tl.pending)
+                    if month:
+                        if not re.fullmatch(r"\d{4}-\d{2}", month.strip()):
+                            return f"ERRO: mês inválido: '{month}' (use AAAA-MM)"
+                        pending = [t for t in pending if t.due_date and t.due_date.strftime("%Y-%m") == month.strip()]
+                    pending.sort(key=lambda t: (t.due_date is None, t.due_date or date.max, t.due_time or time.min))
+                    pages = max(1, math.ceil(len(pending) / PAGE_SIZE))
+                    if not 1 <= page <= pages:
+                        return f"ERRO: a página {page} não existe (há {pages})"
+                    chunk = pending[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
+                    body = format_pending(chunk)
+                    if body:
+                        body += f"\n\nPágina {page}/{pages} ({len(pending)} tarefas)."
+                        if page < pages:
+                            body += f" Use page={page + 1} para continuar."
                 elif wanted == "recorrentes":
                     body = format_recurring(keep(tl.recurring))
                 else:
@@ -65,15 +86,18 @@ def build_task_tools(tasks: TaskStore) -> list[BaseTool]:
             return f"ERRO: {exc}"
 
     @tool
-    def add_task(text: str, due_date: str = "", due_time: str = "", recurrence: str = "", tags: str = "") -> str:
+    def add_task(text: str, due_date: str = "", due_time: str = "", recurrence: str = "", tags: str = "",
+                 ref: str = "") -> str:
         """Cria uma tarefa. `text`: o que fazer (sem a data nem a etiqueta). `due_date`:
         AAAA-MM-DD (converta 'amanhã', 'sexta' etc. usando a data de agora); vazio = sem
         data. `due_time`: HH:MM (só com data, ou numa recorrente). `recurrence`: 'diária',
         'semanal seg,qua' ou 'mensal 5' (tarefa recorrente não tem data). `tags`: etiquetas
-        separadas por vírgula, ex.: 'saúde, casa'."""
+        separadas por vírgula, ex.: 'saúde, casa'. `ref`: caminho do documento da memória com os
+        detalhes (ex.: 'viagens/petrolina-2027.md'); preencha SEMPRE que existir um documento
+        relacionado (confira com list_memory ou search_memory); o documento precisa existir."""
         try:
             task = tasks.add(text, _date_or_none(due_date), _time_or_none(due_time),
-                             Recurrence.parse(recurrence) if recurrence.strip() else None, tags)
+                             Recurrence.parse(recurrence) if recurrence.strip() else None, tags, ref)
             return f"OK: criada [{task.id}] {describe(task)}"
         except TaskError as exc:
             return f"ERRO: {exc}"
@@ -128,4 +152,15 @@ def build_task_tools(tasks: TaskStore) -> list[BaseTool]:
         except TaskError as exc:
             return f"ERRO: {exc}"
 
-    return [list_tasks, add_task, complete_task, reschedule_task, reopen_task, remove_task, tag_task]
+    @tool
+    def link_task(task_id: str, ref: str = "") -> str:
+        """Liga uma tarefa pendente ou recorrente ao documento da memória que tem os detalhes
+        (ex.: ref='viagens/petrolina-2027.md'). `ref` vazio remove a ligação. O documento
+        precisa existir (confira o caminho com list_memory ou search_memory)."""
+        try:
+            task = tasks.set_ref(task_id, ref)
+            return f"OK: referência atualizada [{task.id}] {describe(task)}"
+        except TaskError as exc:
+            return f"ERRO: {exc}"
+
+    return [list_tasks, add_task, complete_task, reschedule_task, reopen_task, remove_task, tag_task, link_task]

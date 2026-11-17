@@ -166,9 +166,9 @@ def test_parse_ignores_text_before_the_first_section_and_unknown_sections():
 def test_add_writes_the_file_in_the_protected_folder_and_persists(tasks, store):
     task = tasks.add("Consulta médica", date(2026, 11, 18), time(8, 0))
     assert len(task.id) == 4
-    text = store.read_doc(TODO_PATH)
+    text = store.read_doc("todos/2026-11.md")  # pendente COM data: arquivo do mês de vencimento
     assert f"- [ ] 2026-11-18 08:00 — Consulta médica ^{task.id}" in text
-    assert text.endswith("\n")
+    assert text.endswith("\n") and "Consulta médica" not in store.read_doc(TODO_PATH)
     reopened = TaskStore(MemoryStore(store.root))
     assert reopened.load().pending == [task]
 
@@ -265,7 +265,9 @@ def test_missing_file_means_empty_list_and_manual_edits_survive_operations(tasks
     assert tasks.load().pending == []
     store.write_doc(TODO_PATH, SAMPLE + "\nnota manual fora de seção\n", internal=True)
     tasks.add("nova")
-    assert "nova" in store.read_doc(TODO_PATH) and "Consulta médica" in store.read_doc(TODO_PATH)
+    assert "nova" in store.read_doc(TODO_PATH)  # sem data: fica no central
+    assert "Consulta médica" in store.read_doc("todos/2026-11.md")  # a lista antiga foi redistribuída por mês
+    assert {t.text for t in tasks.load().pending} >= {"nova", "Consulta médica", "Comprar presente"}
 
 
 # ---- agenda ----------------------------------------------------------------------------
@@ -320,7 +322,9 @@ def test_curator_cannot_write_the_task_file_but_can_read_nothing_odd(tmp_path, s
     tools = {t.name: t for t in build_tools(store, MemoryGit(store.root))}
     out = tools["write_memory"].invoke({"path": TODO_PATH, "content": doc})
     assert out.startswith("ERRO") and "gerenciada pelo bot" in out
-    assert "Consulta médica" in store.read_doc(TODO_PATH)  # intacto
+    shard = tools["write_memory"].invoke({"path": "todos/2026-11.md", "content": doc})
+    assert shard.startswith("ERRO") and "gerenciada pelo bot" in shard
+    assert "Consulta médica" in store.read_doc("todos/2026-11.md")  # intacto
 
 
 def test_task_file_is_hidden_from_list_search_and_index(tasks, store):

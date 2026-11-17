@@ -577,4 +577,4 @@ def test_main_gives_the_responder_the_send_attachment_tool(monkeypatch, tmp_path
     assert code == 0
     assert seen["names"][:4] == ["list_memory", "search_memory", "read_memory", "send_attachment"]
     assert seen["names"][4:] == ["list_tasks", "add_task", "complete_task", "reschedule_task",
-                                 "reopen_task", "remove_task", "tag_task"]
+                                 "reopen_task", "remove_task", "tag_task", "link_task"]

@@ -129,6 +129,7 @@ class Task:
     due_time: time | None = None
     recurrence: Recurrence | None = None
     tags: tuple[str, ...] = ()
+    ref: str = ""  # documento da memória com os detalhes (ex.: viagens/petrolina-2027.md)
 
 
 @dataclass
@@ -139,6 +140,7 @@ class Completion:
     due_time: time | None
     done_on: date
     tags: tuple[str, ...] = ()
+    ref: str = ""
 
 
 @dataclass
@@ -183,6 +185,32 @@ def with_tags(text: str, tags: tuple[str, ...]) -> str:
     return text + "".join(f" #{t}" for t in tags)
 
 
+# ---- referência a um documento (link Markdown relativo) -----------------------------------
+
+_REF_LINK = re.compile(r"\s\[[^\]]*\]\(\.\./([^)\s]+\.md)\)\s*$")
+_REF_PATH = re.compile(r"[\w./-]+\.md", re.UNICODE)
+
+
+def normalize_ref(ref: str) -> str:
+    """'viagens/petrolina-2027.md' (relativo à raiz da memória); '' = sem referência."""
+    ref = ref.strip().lstrip("/")
+    if not ref:
+        return ""
+    if ".." in ref.split("/") or not _REF_PATH.fullmatch(ref):
+        raise TaskError(f"referência inválida: '{ref}' (use o caminho de um documento, ex.: viagens/x.md)")
+    return ref
+
+
+def split_ref(content: str) -> tuple[str, str]:
+    """Separa o link '[detalhes](../viagens/x.md)' do fim da linha."""
+    match = _REF_LINK.search(content)
+    return (content[: match.start()].rstrip(), match.group(1)) if match else (content, "")
+
+
+def with_ref(content: str, ref: str) -> str:
+    return f"{content} [detalhes](../{ref})" if ref else content
+
+
 def clean_text(text: str) -> str:
     """Uma linha só, sem o '^' que marcaria um ID; vazio ou longo demais é erro."""
     text = " ".join(text.replace("^", "").split())
@@ -219,20 +247,21 @@ def parse(text: str) -> TaskList:
             tl.extras.setdefault(section, []).append(line)
             continue
         content, task_id = item.group(2)[: id_match.start()].strip(), id_match.group(1)
+        content, ref = split_ref(content)
         try:
             if section == SECTION_PENDING and item.group(1) == " " and (m := _PENDING.match(content)):
                 due, tm = _parse_when(m.group(1), m.group(2))
                 text, tags = split_tags(m.group(3))
-                tl.pending.append(Task(task_id, text, due, tm, tags=tags))
+                tl.pending.append(Task(task_id, text, due, tm, tags=tags, ref=ref))
             elif section == SECTION_RECURRING and item.group(1) == " " and (m := _RECURRING.match(content)):
                 rec = Recurrence.parse(m.group(1))
                 text, tags = split_tags(m.group(3))
                 tl.recurring.append(Task(task_id, text, due_time=parse_time(m.group(2)) if m.group(2) else None,
-                                         recurrence=rec, tags=tags))
+                                         recurrence=rec, tags=tags, ref=ref))
             elif section == SECTION_DONE and item.group(1) == "x" and (m := _DONE.match(content)):
                 due, tm = _parse_when(m.group(1), m.group(2))
                 text, tags = split_tags(m.group(3))
-                tl.done.append(Completion(task_id, text, due, tm, date.fromisoformat(m.group(4)), tags))
+                tl.done.append(Completion(task_id, text, due, tm, date.fromisoformat(m.group(4)), tags, ref))
             else:
                 raise ValueError
         except (ValueError, TaskError):
@@ -247,31 +276,38 @@ def _when(d: date | None, t: time | None) -> str:
     return " ".join(p for p in (d.isoformat() if d else "", fmt_time(t)) if p)
 
 
+def _pending_line(t: Task) -> str:
+    when = _when(t.due_date, t.due_time)
+    return f"- [ ] {when + SEP if when else ''}{with_ref(with_tags(t.text, t.tags), t.ref)} ^{t.id}"
+
+
+def _recurring_line(t: Task) -> str:
+    rule = " ".join(p for p in (t.recurrence.render(), fmt_time(t.due_time)) if p)
+    return f"- [ ] {rule}{SEP}{with_ref(with_tags(t.text, t.tags), t.ref)} ^{t.id}"
+
+
+def _done_line(c: Completion) -> str:
+    body = f"{with_tags(c.text, c.tags)} (feita em {c.done_on.isoformat()})"
+    return f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{with_ref(body, c.ref)} ^{c.id}"
+
+
+def _front(description: str) -> str:
+    dumped = yaml.safe_dump({"description": description}, allow_unicode=True, sort_keys=False).strip()
+    return f"---\n{dumped}\n---"
+
+
 def render(tl: TaskList) -> str:
+    """Arquivo central (todos/todo.md): pendentes sem data, recorrentes e concluídas recentes.
+    As pendentes COM data ficam em arquivos mensais (render_month); quem chama as separa."""
     pending = sorted(tl.pending, key=lambda x: (x.due_date or date.max, x.due_time or time.min))
     recurring = sorted(tl.recurring, key=lambda x: x.due_time or time.min)
     done = sorted(tl.done, key=lambda c: c.done_on, reverse=True)[:MAX_DONE]
-
-    def pending_line(t: Task) -> str:
-        when = _when(t.due_date, t.due_time)
-        return f"- [ ] {when + SEP if when else ''}{with_tags(t.text, t.tags)} ^{t.id}"
-
-    def recurring_line(t: Task) -> str:
-        return f"- [ ] {' '.join(p for p in (t.recurrence.render(), fmt_time(t.due_time)) if p)}{SEP}{with_tags(t.text, t.tags)} ^{t.id}"
-
-    def done_line(c: Completion) -> str:
-        return f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{with_tags(c.text, c.tags)} (feita em {c.done_on.isoformat()}) ^{c.id}"
-
     sections = (
-        (SECTION_PENDING, [pending_line(t) for t in pending]),
-        (SECTION_RECURRING, [recurring_line(t) for t in recurring]),
-        (SECTION_DONE, [done_line(c) for c in done]),
+        (SECTION_PENDING, [_pending_line(t) for t in pending]),
+        (SECTION_RECURRING, [_recurring_line(t) for t in recurring]),
+        (SECTION_DONE, [_done_line(c) for c in done]),
     )
-    front = yaml.safe_dump(
-        {"description": "Lista de tarefas gerenciada pelo bot: pendentes, recorrentes e concluídas."},
-        allow_unicode=True, sort_keys=False,
-    ).strip()
-    out = [f"---\n{front}\n---", "# Tarefas", ""]
+    out = [_front("Lista de tarefas gerenciada pelo bot: sem data, recorrentes e concluídas recentes."), "# Tarefas", ""]
     for name, lines in sections:
         out += [f"## {name}", ""]
         out += [*lines, *tl.extras.get(name, [])] or [EMPTY]
@@ -279,11 +315,50 @@ def render(tl: TaskList) -> str:
     return "\n".join(out)
 
 
+def render_month(tasks: list[Task], month: str, extras: list[str] | None = None) -> str:
+    """Pendentes com vencimento em `month` (todos/AAAA-MM.md), só com a seção Pendentes."""
+    lines = [_pending_line(t) for t in sorted(tasks, key=lambda x: (x.due_date or date.max, x.due_time or time.min))]
+    lines += list(extras or [])
+    return "\n".join([_front(f"Tarefas pendentes com vencimento em {month}."),
+                      f"# Tarefas com vencimento em {month}", "", f"## {SECTION_PENDING}", "",
+                      *(lines or [EMPTY]), ""])
+
+
+def _n(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def render_index(central: TaskList, months: dict[str, int], archives: dict[str, int], current_month: str) -> str:
+    """Índice da pasta todos/: o arquivo central, os meses de pendentes (futuros e já
+    vencidos) e o arquivo mensal das concluídas. Gerado por código a cada alteração."""
+    out = [_front("Índice das tarefas: lista central, pendentes por mês e arquivo de concluídas."),
+           "# Índice das tarefas", "", "Gerado automaticamente a cada alteração; não edite à mão.", "",
+           "## Lista central", "",
+           "- [Sem data, recorrentes e concluídas recentes](todo.md) — "
+           + ", ".join([_n(len(central.pending), "tarefa sem data", "tarefas sem data"),
+                        _n(len(central.recurring), "recorrente", "recorrentes"),
+                        _n(len(central.done), "concluída recente", "concluídas recentes")]), "",
+           "## Pendentes por mês", ""]
+    if months:
+        for month in sorted(months):
+            note = ""
+            if months[month] and month < current_month:
+                note = " (vencimento já passou)"
+            label = _n(months[month], "pendente", "pendentes") if months[month] else "sem pendentes"
+            out.append(f"- [{month}]({month}.md) — {label}{note}")
+    else:
+        out.append(EMPTY)
+    out += ["", "## Concluídas (arquivo mensal)", ""]
+    if archives:
+        out += [f"- [{month}](arquivo/{month}.md) — {_n(archives[month], 'concluída', 'concluídas')}"
+                for month in sorted(archives, reverse=True)]
+    else:
+        out.append(EMPTY)
+    return "\n".join([*out, ""])
+
+
 def render_archive(done: list[Completion], month: str) -> str:
     """Arquivo mensal de concluídas (todos/arquivo/AAAA-MM.md), só com a seção Concluídas."""
-    front = yaml.safe_dump({"description": f"Arquivo de tarefas concluídas em {month}."},
-                           allow_unicode=True, sort_keys=False).strip()
-    lines = [f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{with_tags(c.text, c.tags)} (feita em {c.done_on.isoformat()}) ^{c.id}"
-             for c in sorted(done, key=lambda c: c.done_on, reverse=True)]
-    return "\n".join([f"---\n{front}\n---", f"# Tarefas concluídas em {month}", "",
-                      f"## {SECTION_DONE}", "", *lines, ""])
+    lines = [_done_line(c) for c in sorted(done, key=lambda c: c.done_on, reverse=True)]
+    return "\n".join([_front(f"Arquivo de tarefas concluídas em {month}."),
+                      f"# Tarefas concluídas em {month}", "", f"## {SECTION_DONE}", "", *lines, ""])

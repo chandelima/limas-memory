@@ -5,19 +5,24 @@ A pasta `todos/` é protegida na store: o Curator não escreve nela, só este m�
 formato. As mudanças valem na hora e entram no próximo commit do Curator.
 """
 
+import re
 import secrets
 import threading
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from typing import Callable
 
-from storage.store import MemoryStore, StoreError
+from storage.store import MemoryStore, StoreError, is_protected
 from tasks import model
 from tasks.model import Completion, Recurrence, Task, TaskError, TaskList
 
-TODO_PATH = "todos/todo.md"
+TODO_PATH = "todos/todo.md"  # central: sem data, recorrentes e concluídas recentes
+SHARD_DIR = "todos"  # pendentes com data: um arquivo por mês de vencimento (todos/AAAA-MM.md)
+SHARD = re.compile(r"todos/\d{4}-\d{2}\.md")
+INDEX_PATH = "todos/index.md"  # aponta para o central, os meses e o arquivo das concluídas
 ARCHIVE_DIR = "todos/arquivo"  # concluídas antigas, um arquivo por mês (AAAA-MM.md)
 ARCHIVE_DAYS = 30  # concluídas mais antigas que isso saem do arquivo principal
+ARCHIVE_FILE = re.compile(r"todos/arquivo/\d{4}-\d{2}\.md")
 
 
 @dataclass
@@ -49,14 +54,36 @@ class TaskStore:
         self.store = store
         self.today = today
         self._lock = threading.RLock()
+        self._shard_extras: dict[str, list[str]] = {}  # linhas não reconhecidas, por arquivo mensal
 
     # ---- leitura e gravação do arquivo ---------------------------------------
 
+    def _shard_paths(self) -> list[str]:
+        return sorted(p for p in self.store.list_paths() if SHARD.fullmatch(p))
+
     def load(self) -> TaskList:
+        """Arquivo central (sem data, recorrentes, concluídas recentes) + todos os arquivos
+        mensais de pendentes. Uma lista antiga, com tudo no central, também é lida."""
         try:
-            return model.parse(self.store.read_doc(TODO_PATH))
+            tl = model.parse(self.store.read_doc(TODO_PATH))
         except StoreError:  # ainda não existe
-            return TaskList()
+            tl = TaskList()
+        seen = {t.id for t in tl.pending}
+        self._shard_extras = {}
+        for path in self._shard_paths():
+            shard = model.parse(self.store.read_doc(path))
+            self._shard_extras[path] = shard.extras.get(model.SECTION_PENDING, [])
+            tl.pending += [t for t in shard.pending if t.id not in seen]
+            seen |= {t.id for t in shard.pending}
+        return tl
+
+    def _write_if_changed(self, path: str, text: str) -> None:
+        try:
+            current = self.store.read_doc(path)
+        except StoreError:
+            current = None
+        if current != text:  # só toca nos arquivos que mudaram (diffs pequenos no git)
+            self.store.write_doc(path, text, internal=True)
 
     def _save(self, tl: TaskList) -> None:
         """Grava a lista. Concluídas antigas (mais de ARCHIVE_DAYS dias, ou além do teto
@@ -70,7 +97,30 @@ class TaskStore:
         if old:
             self._archive(old)
             tl.done = keep[: model.MAX_DONE]
-        self.store.write_doc(TODO_PATH, model.render(tl), internal=True)
+        # pendentes COM data vão para o arquivo do mês de vencimento; o resto fica no central
+        dated: dict[str, list[Task]] = {}
+        for task in tl.pending:
+            if task.due_date:
+                dated.setdefault(task.due_date.strftime("%Y-%m"), []).append(task)
+        central = TaskList(pending=[t for t in tl.pending if t.due_date is None], recurring=tl.recurring,
+                           done=tl.done, extras=tl.extras)
+        self._write_if_changed(TODO_PATH, model.render(central))
+        for path in sorted(set(self._shard_extras) | {f"{SHARD_DIR}/{m}.md" for m in dated}):
+            month = path.removeprefix(f"{SHARD_DIR}/").removesuffix(".md")
+            self._write_if_changed(
+                path, model.render_month(dated.get(month, []), month, self._shard_extras.get(path, [])))
+        self._write_index(central, dated)
+
+    def _write_index(self, central: TaskList, dated: dict[str, list[Task]]) -> None:
+        """todos/index.md: aponta para todos os arquivos de tarefas que existem."""
+        months = {path.removeprefix(f"{SHARD_DIR}/").removesuffix(".md"): 0 for path in self._shard_paths()}
+        months.update({m: len(tasks) for m, tasks in dated.items()})
+        archives = {}
+        for path in self.store.list_paths():
+            if ARCHIVE_FILE.fullmatch(path):
+                archives[path.removeprefix(f"{ARCHIVE_DIR}/").removesuffix(".md")] = len(
+                    model.parse(self.store.read_doc(path)).done)
+        self._write_if_changed(INDEX_PATH, model.render_index(central, months, archives, self.today().strftime("%Y-%m")))
 
     def _archive(self, done: list[Completion]) -> None:
         by_month: dict[str, list[Completion]] = {}
@@ -101,18 +151,19 @@ class TaskStore:
     # ---- mudanças ------------------------------------------------------------
 
     def add(self, text: str, due_date: date | None = None, due_time: time | None = None,
-            recurrence: Recurrence | None = None, tags=()) -> Task:
+            recurrence: Recurrence | None = None, tags=(), ref: str = "") -> Task:
         text, inline = model.split_tags(model.clean_text(text))  # '#etiqueta' no fim do texto também vale
         if not text:
             raise TaskError("a tarefa precisa de um texto")
         tags = tuple(dict.fromkeys((*inline, *model.parse_tags(tags))))
+        ref = self._check_ref(ref)
         if recurrence is not None and due_date is not None:
             raise TaskError("tarefa recorrente não tem data; informe só a recorrência (e a hora)")
         if due_time is not None and due_date is None and recurrence is None:
             raise TaskError("uma hora precisa de uma data")
         with self._lock:
             tl = self.load()
-            task = Task(self._new_id(tl), text, due_date, due_time, recurrence, tags)
+            task = Task(self._new_id(tl), text, due_date, due_time, recurrence, tags, ref)
             (tl.recurring if recurrence else tl.pending).append(task)
             self._save(tl)
             return task
@@ -123,14 +174,14 @@ class TaskStore:
             tl = self.load()
             if task := self._find(tl.pending, task_id):
                 tl.pending.remove(task)
-                done = Completion(task.id, task.text, task.due_date, task.due_time, on, task.tags)
+                done = Completion(task.id, task.text, task.due_date, task.due_time, on, task.tags, task.ref)
             elif task := self._find(tl.recurring, task_id):
                 if not task.recurrence.occurs_on(on):
                     raise TaskError(f"'{task.text}' não ocorre em {on.isoformat()} ({task.recurrence.render()})")
                 existing = next((c for c in tl.done if c.id == task.id and c.done_on == on), None)
                 if existing:
                     return existing  # já estava cumprida nesse dia
-                done = Completion(task.id, task.text, on, task.due_time, on, task.tags)
+                done = Completion(task.id, task.text, on, task.due_time, on, task.tags, task.ref)
             elif self._find(tl.done, task_id):
                 raise TaskError(f"a tarefa {task_id} já está concluída")
             else:
@@ -156,7 +207,7 @@ class TaskStore:
             if not match:
                 raise TaskError(f"não existe tarefa concluída com o ID {task_id}")
             tl.done.remove(match)
-            task = Task(match.id, match.text, match.due_date, match.due_time, tags=match.tags)
+            task = Task(match.id, match.text, match.due_date, match.due_time, tags=match.tags, ref=match.ref)
             tl.pending.append(task)
             self._save(tl)
             return task
@@ -170,6 +221,32 @@ class TaskStore:
                     raise TaskError("tarefa recorrente: remova-a e crie outra com a nova recorrência")
                 raise TaskError(f"não existe tarefa pendente com o ID {task_id}")
             task.due_date, task.due_time = due_date, due_time
+            self._save(tl)
+            return task
+
+    def _check_ref(self, ref: str) -> str:
+        """Referência válida: caminho de um documento que EXISTE na memória e não é de uma
+        pasta gerenciada por código (todos/, anexos/). Vazio = sem referência."""
+        ref = model.normalize_ref(ref)
+        if not ref:
+            return ""
+        if is_protected(ref):
+            raise TaskError("não referencie arquivos de todos/ ou anexos/; use o documento do assunto")
+        try:
+            self.store.read_doc(ref)
+        except StoreError:
+            raise TaskError(f"o documento '{ref}' não existe na memória (confira o caminho com list_memory)") from None
+        return ref
+
+    def set_ref(self, task_id: str, ref: str) -> Task:
+        """Liga uma tarefa pendente ou recorrente a um documento da memória ('' remove a ligação)."""
+        ref = self._check_ref(ref)
+        with self._lock:
+            tl = self.load()
+            task = self._find(tl.pending, task_id) or self._find(tl.recurring, task_id)
+            if task is None:
+                raise TaskError(f"não existe tarefa pendente ou recorrente com o ID {task_id}")
+            task.ref = ref
             self._save(tl)
             return task
 
