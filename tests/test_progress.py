@@ -33,8 +33,7 @@ def test_the_message_starts_as_italic_thinking_and_the_steps_are_edited_in_itali
     assert gw.progress_edits[0] == "<i>💭 Thinking…</i>"
     assert gw.progress_edits[-1] == "<i>🗂️ Looking at what I remember…</i>\n<i>📖 Reading a.md…</i>"
     assert gw.sent() == ["The answer."]
-    # the final message keeps the thinking (italics) on top and the answer below, in normal text
-    assert gw.last_answer_html == "<i>🗂️ Looking at what I remember…</i>\n<i>📖 Reading a.md…</i>\n\nThe answer."
+    assert gw.last_answer_html == "The answer."  # the thinking is erased: the final message is just the answer
 
 
 def test_the_models_text_is_streamed_as_it_arrives_below_the_thinking():
@@ -54,8 +53,8 @@ def test_the_models_text_is_streamed_as_it_arrives_below_the_thinking():
     partials = [e for e in gw.progress_edits if "You have" in e]
     assert partials[0].endswith("▍")  # a cursor while the model is still writing
     assert any("You have two tasks" in e and e.endswith("▍") for e in gw.progress_edits)  # it grows as tokens arrive
-    assert all(e.startswith("<i>📋 Checking your tasks…</i>") for e in partials)  # the thinking stays on top
-    assert gw.last_answer_html == "<i>📋 Checking your tasks…</i>\n\nYou have two tasks today."  # no cursor in the end
+    assert all("<i>" not in e for e in partials)  # once the answer starts, the thinking is gone
+    assert gw.last_answer_html == "You have two tasks today."  # and there is no cursor in the end
 
 
 def test_text_written_before_a_tool_call_becomes_an_italic_thought():
@@ -76,7 +75,7 @@ def test_text_written_before_a_tool_call_becomes_an_italic_thought():
     assert any(e == "Let me check your memory first. ▍" for e in gw.progress_edits)  # shown as text while streaming
     assert "<i>Let me check your memory first.</i>\n<i>🗂️ Looking at what I remember…</i>" in gw.progress_edits[-2] or \
         any("<i>Let me check your memory first.</i>\n<i>🗂️" in e for e in gw.progress_edits)
-    assert gw.last_answer_html.endswith("</i>\n\nFound it.")
+    assert gw.last_answer_html == "Found it."
 
 
 def test_the_thinking_has_a_fake_typing_effect_in_blocks_of_words():
@@ -100,7 +99,7 @@ def test_the_thinking_has_a_fake_typing_effect_in_blocks_of_words():
     assert lengths == sorted(lengths)  # ... never shrinking
     assert typed[0].endswith(" ▍</i>") and not typed[0].startswith("<i>" + thought)  # partial, with the cursor
     assert any(thought in e and "Looking at what I remember" in e for e in gw.progress_edits)  # fully typed
-    assert gw.last_answer_html.endswith("\n\nDone.")
+    assert gw.last_answer_html == "Done."
 
 
 def test_push_from_a_worker_thread_is_safe_and_identical_steps_are_one_line():
@@ -120,7 +119,7 @@ def test_push_from_a_worker_thread_is_safe_and_identical_steps_are_one_line():
         await p.finish("ok")
 
     run(scenario())
-    assert gw.last_answer_html == "<i>📋 Checking your tasks…</i>\n\nok"
+    assert gw.last_answer_html == "ok"
     assert max(e.count("Checking your tasks") for e in gw.progress_edits) == 1
 
 
@@ -135,7 +134,8 @@ def test_html_in_the_thinking_and_in_the_answer_is_escaped():
         await p.finish("a < b & c > d")
 
     run(scenario())
-    assert gw.last_answer_html == "<i>🔎 Searching the memory for “&lt;b&gt;&amp;”…</i>\n\na &lt; b &amp; c &gt; d"
+    assert any("Searching the memory for “&lt;b&gt;&amp;”" in e for e in gw.progress_edits)  # escaped while thinking
+    assert gw.last_answer_html == "a &lt; b &amp; c &gt; d"  # and in the answer
 
 
 def test_without_thinking_the_message_just_becomes_the_answer():
@@ -148,7 +148,7 @@ def test_without_thinking_the_message_just_becomes_the_answer():
 
     run(scenario())
     assert gw.progress_edits == ["<i>💭 Thinking…</i>"] and gw.sent() == ["quick answer"]
-    assert gw.last_answer_html == "quick answer"  # no italic header when there was nothing to show
+    assert gw.last_answer_html == "quick answer"
 
 
 def test_if_the_progress_message_cannot_be_sent_the_answer_goes_the_normal_way():

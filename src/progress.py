@@ -4,16 +4,16 @@
     <i>🗂️ Looking at what I remember…</i>      the agent's steps, in italics, "typed" in as they happen
     <i>📖 Reading trips/x.md…</i>
 
-    <i>…the thinking stays on top…</i>
-    The answer grows here as the model          ← the model's text, streamed for real, token by token
-    writes it, in normal text.
+    The answer grows here as the model          ← the thinking is ERASED when the answer starts; the model's
+    writes it, in normal text.                    text is streamed for real, token by token
 
 * Thinking (steps and thoughts) is in italics (Telegram HTML), so it is told apart from the answer. It
   has a FAKE typing effect: each new line is revealed in blocks of words at THINKING_CPS characters per
   second, by editing the message. The answer is held back until the thinking has finished typing.
 * The answer is REAL streaming: the model's text is shown as it arrives. If the model writes some text
   and then asks for a tool ("let me check..."), that text is moved up as an italic thought.
-* Nothing is deleted: the same message is edited from the first "thinking" line to the final answer.
+* When the answer starts, the thinking is erased from the message: the final message is just the answer.
+  The message itself is never deleted: the same one is edited from the "thinking" line to the answer.
 
 Telegram allows about one edit per second per chat, so the message is refreshed every EDIT_INTERVAL
 seconds at most, with everything received/typed so far. The agent runs in a worker thread and reports
@@ -157,12 +157,10 @@ class Progress:
         lines = full[: self._typed].split("\n") if self._typed else []
         if typing and lines:
             lines[-1] += CURSOR
+        if self._answer.strip() and not typing:  # the answer started (after the thinking finished typing):
+            return html.escape(self._answer[:FIRST_CHUNK]) + CURSOR  # ... the thinking is erased
         header = italics(lines[-MAX_LINES:]) if lines else ""
-        # the answer waits until the thinking has finished typing
-        body = html.escape(self._answer[:FIRST_CHUNK]) + CURSOR if (self._answer.strip() and not typing) else ""
-        if not header and not body:
-            return italics([t("progress_thinking")])
-        return header + ("\n\n" if header and body else "") + body
+        return header or italics([t("progress_thinking")])
 
     async def _follow(self) -> None:
         while True:
@@ -191,15 +189,13 @@ class Progress:
             self._task = None
 
     async def finish(self, text: str) -> None:
-        """Turn the message into the final answer (thinking in italics on top, answer below) or, if
-        there is no progress message, send it the normal way. The answer is never lost."""
+        """Turn the message into the final answer (the thinking is erased) or, if there is no progress
+        message, send it the normal way. The answer is never lost."""
         await self._stop()  # no step edit can land after (and overwrite) the final text
         if self.message_id is None:
             await self.gateway.send_text(self.chat_id, text)
             return
         chunks = split_message(to_plain(text), FIRST_CHUNK) or [t("no_reply")]
-        header = italics(self._lines[-MAX_LINES:]) if self._lines else ""  # no thinking: just the answer
-        final = header + ("\n\n" if header else "") + html.escape(chunks[0])
-        await self.gateway.write_answer(self.chat_id, self.message_id, final, chunks[0])
+        await self.gateway.write_answer(self.chat_id, self.message_id, html.escape(chunks[0]), chunks[0])  # only the answer
         for chunk in chunks[1:]:  # an answer too long for one message continues in new ones
             await self.gateway.send_text(self.chat_id, chunk, raw=True)
