@@ -212,3 +212,12 @@ def test_last_message_at(log):
     log.append("usuario", "a", at="2026-11-17T10:00:00-03:00")
     log.append("assistente", "b", at="2026-11-17T10:05:00-03:00")
     assert log.last_message_at().isoformat() == "2026-11-17T10:05:00-03:00"
+
+
+def test_history_only_includes_answered_user_messages_besides_the_target(log):
+    answered = log.append("usuario", "respondida", status=ANSWERED)
+    log.append("assistente", "resposta", reply_to=answered.id)
+    log.append("usuario", "falhou", status=FAILED)
+    log.append("usuario", "em andamento", status=READING)
+    target = log.append("usuario", "alvo", status=READY)
+    assert [m.text for m in log.history(target.id, 10)] == ["respondida", "resposta", "alvo"]

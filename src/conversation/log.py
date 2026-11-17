@@ -178,13 +178,13 @@ class ConversationLog:
 
     def history(self, upto_id: int, n: int) -> list[Message]:
         """Até `n` mensagens, na ordem da conversa, terminando na mensagem `upto_id` do
-        usuário. Inclui só o que já está resolvido (respondido/falhou) mais a própria
-        `upto_id`; mensagens em andamento e posteriores ficam de fora."""
+        usuário. Inclui só falas já respondidas mais a própria `upto_id`: mensagens em
+        andamento, descartadas ou com falha (sem resposta) e as posteriores ficam de fora."""
         with self._lock:
             chosen = []
             for m in self._messages:
                 if m.role == "usuario":
-                    if m.id == upto_id or (m.id < upto_id and m.status in FINAL):
+                    if m.id == upto_id or (m.id < upto_id and m.status == ANSWERED):
                         chosen.append(m)
                 else:  # resposta do assistente: entra se responde a algo anterior a `upto_id`
                     ref = m.reply_to if m.reply_to is not None else m.id

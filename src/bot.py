@@ -7,21 +7,28 @@ Uso:
 
 Só o usuário em TELEGRAM_ALLOWED_USER_ID é atendido (e só em conversa privada). Sem essa
 env, o bot recusa todo mundo e imprime o ID de quem escreveu, para você configurá-la.
-Cada mensagem vai para o histórico; o agente de resposta lê a memória (somente leitura);
-depois de CURATOR_IDLE_SECONDS sem mensagens, o Curator processa o que ficou pendente e o
-relatório é enviado a você (uma falha é avisada uma vez por sequência).
+
+Fluxo de cada mensagem:
+  1. chegada: a mensagem é gravada no histórico na hora (estado received/reading) e o
+     "digitando..." liga, antes de qualquer processamento;
+  2. fila: uma mensagem é processada por vez, na ordem de chegada (o "digitando..." continua
+     enquanto ela espera a vez); arquivos são baixados e lidos; o agente de resposta consulta
+     a memória (somente leitura) e responde;
+  3. depois de CURATOR_IDLE_SECONDS sem mensagens, o Curator processa o que ficou pendente e
+     o relatório é enviado a você (uma falha é avisada uma vez por sequência).
+Se o bot cair no meio, ao reiniciar ele retoma as mensagens sem resposta das últimas 24 h.
 Comandos: /status e /curate (não vão para o modelo).
 """
 
 import argparse
 import asyncio
 import logging
-import re
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from telegram import BotCommand, BotCommandScopeChat, ReplyParameters, Update
-from telegram.constants import ChatAction, ChatType
+from telegram import BotCommand, Update
+from telegram.constants import ChatType
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 import config
@@ -29,43 +36,24 @@ from attachments import reader
 from attachments.registry import AttachmentRegistry
 from attachments.tools import build_attachment_tools
 from chatflow import Conversation, build_service, describe_outcome
-from conversation.log import ConversationLog
+from conversation.log import READING, ConversationLog
 from responder.agent import build_responder, default_read_tools
 from storage.store import MemoryStore
+from telegram_gateway import TELEGRAM_LIMIT, TYPING_INTERVAL, TelegramGateway, split_message, to_plain  # noqa: F401
 
-TELEGRAM_LIMIT = 4096  # tamanho máximo de uma mensagem do Telegram
 WATCH_INTERVAL = 30  # segundos entre verificações de inatividade
-TYPING_INTERVAL = 4  # o indicador "digitando..." dura ~5s
 SHUTDOWN_WAIT = 30  # espera máxima por uma curadoria em andamento ao encerrar
+RECOVERY_MAX_AGE = timedelta(hours=24)  # mensagens sem resposta mais antigas que isso são descartadas
 
 HELP = "Pode conversar comigo normalmente.\n/status mostra o estado da memória.\n/curate processa agora o que ficou pendente."
+FILE_NOTICE = "Recebi o arquivo, lendo..."
+RECOVERY_NOTICE = "Voltei depois de uma reinicialização e vou responder as mensagens que ficaram pendentes."
+ERROR_REPLY = "Tive um problema para responder agora. Tente de novo em instantes."
 
-
-def to_plain(text: str) -> str:
-    """O bot envia texto simples (sem parse_mode): tira a marcação Markdown que os
-    modelos às vezes usam (**negrito**, __negrito__, `código`, títulos com #)."""
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"`+([^`\n]+)`+", r"\1", text)
-    return re.sub(r"^#{1,6}[ \t]+", "", text, flags=re.MULTILINE)
-
-
-def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
-    """Divide em pedaços de até `limit`, preferindo quebrar em parágrafo, linha ou espaço."""
-    text = text.strip()
-    chunks = []
-    while len(text) > limit:
-        cut = limit
-        for sep in ("\n\n", "\n", " "):
-            idx = text.rfind(sep, 0, limit)
-            if idx > 0:
-                cut = idx
-                break
-        chunks.append(text[:cut].rstrip())
-        text = text[cut:].lstrip()
-    if text:
-        chunks.append(text)
-    return chunks
+COMMANDS = [
+    BotCommand("status", "Mostra o estado da memória e das mensagens pendentes"),
+    BotCommand("curate", "Processa agora as mensagens pendentes na memória"),
+]
 
 
 class BotHandlers:
@@ -76,13 +64,15 @@ class BotHandlers:
         registry: AttachmentRegistry | None = None,
         read_document=reader.read_document,
         verbose: bool = False,
+        gateway_factory=TelegramGateway,
     ):
         self.conversation = conversation
         self.allowed_user_id = allowed_user_id
         self.registry = registry  # sem registro, o bot ignora arquivos
         self.read_document = read_document
         self.verbose = verbose  # imprime no console as consultas à memória de cada resposta
-        self._lock = asyncio.Lock()  # uma conversa por vez: o histórico é sequencial
+        self.gateway_factory = gateway_factory
+        self._lock = asyncio.Lock()  # uma mensagem por vez: o histórico é sequencial
 
     def _authorized(self, update: Update) -> bool:
         user, chat = update.effective_user, update.effective_chat
@@ -94,71 +84,49 @@ class BotHandlers:
             return False
         return user.id == self.allowed_user_id
 
-    async def _reply(self, update: Update, text: str) -> None:
-        for chunk in split_message(to_plain(text)) or ["(sem resposta)"]:
-            await update.message.reply_text(chunk)
-
-    async def _keep_typing(self, update: Update) -> None:
-        while True:
-            await update.effective_chat.send_action(ChatAction.TYPING)
-            await asyncio.sleep(TYPING_INTERVAL)
+    # ---- comandos (não vão para o modelo) ------------------------------------
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self._authorized(update):
-            await update.message.reply_text(f"Olá! {HELP}")
+            await self.gateway_factory(context.bot).send_text(update.effective_chat.id, f"Olá! {HELP}")
 
-    async def _respond(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, attachments: list[str] | None = None
-    ) -> None:
-        """Passa o texto ao agente de resposta, responde e envia os arquivos que ele pediu."""
-        async with self._lock:
-            typing = asyncio.create_task(self._keep_typing(update))
-            try:
-                result = await asyncio.to_thread(self.conversation.respond, text, attachments)
-            except Exception as exc:  # noqa: BLE001 - nunca expõe detalhes internos no chat
-                print(f"[bot] erro ao responder: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-                await update.message.reply_text("Tive um problema para responder agora. Tente de novo em instantes.")
-                return
-            finally:
-                typing.cancel()
-        if self.verbose:
-            self._log_trace(result)
-        await self._reply(update, result.text)
-        await self._send_files(update, context, result.files)
+    async def on_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if self._authorized(update):
+            await self.gateway_factory(context.bot).send_text(update.effective_chat.id, self.conversation.status())
 
-    @staticmethod
-    def _log_trace(result) -> None:
-        """Modo --verbose: mostra no console o que o agente consultou para responder."""
-        for event in result.trace:
-            args = ", ".join(f"{k}={v!r}" for k, v in event.args.items())
-            print(f"  [memória] {event.name}({args})", flush=True)
-        for att in result.files:
-            print(f"  [arquivo] reenviando {att.ref} ({att.filename})", flush=True)
+    async def on_curate(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._authorized(update):
+            return
+        gateway, chat_id = self.gateway_factory(context.bot), update.effective_chat.id
+        async with gateway.typing(chat_id):
+            report = await asyncio.to_thread(self.conversation.curate_now)
+        await gateway.send_text(chat_id, report)
 
-    async def _send_files(self, update: Update, context: ContextTypes.DEFAULT_TYPE, files: list) -> None:
-        """Reenvia os arquivos pelo file_id, citando a mensagem original quando ela existir."""
-        for att in files:
-            reply_to = ReplyParameters(message_id=att.message_id, allow_sending_without_reply=True)
-            send = context.bot.send_photo if att.kind == "photo" else context.bot.send_document
-            kwargs = {"photo": att.file_id} if att.kind == "photo" else {"document": att.file_id}
-            try:
-                await send(chat_id=update.effective_chat.id, reply_parameters=reply_to, **kwargs)
-            except Exception as exc:  # noqa: BLE001
-                print(f"[bot] erro ao reenviar {att.ref}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-                await update.message.reply_text(f"Não consegui reenviar o arquivo {att.filename}.")
+    async def on_unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if self._authorized(update):
+            await self.gateway_factory(context.bot).send_text(
+                update.effective_chat.id, f"Comando desconhecido. {HELP}")
+
+    # ---- mensagens: gravar na chegada, "digitando" já, processar na vez ------
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
         text = (update.message.text or "").strip()
-        if text:
-            await self._respond(update, context, text)
+        if not text:
+            return
+        gateway, chat_id = self.gateway_factory(context.bot), update.effective_chat.id
+        msg = self.conversation.ingest(text)  # 1. grava antes de qualquer outra coisa
+        async with gateway.typing(chat_id):  # 2. "digitando..." já, mesmo esperando a vez
+            async with self._lock:  # 3. uma por vez, na ordem de chegada
+                await self._answer(gateway, chat_id, msg.id)
 
     async def on_file(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Documento ou foto: baixa, lê o conteúdo, registra o anexo e passa ao agente."""
+        """Documento ou foto: grava na chegada, avisa que está lendo e processa na vez."""
         if not self._authorized(update) or self.registry is None:
             return
         msg = update.message
+        gateway, chat_id = self.gateway_factory(context.bot), update.effective_chat.id
         if msg.document:
             kind, item = "document", msg.document
             filename = item.file_name or "arquivo"
@@ -169,69 +137,111 @@ class BotHandlers:
         else:
             return
         if not reader.is_supported(mime):
-            await msg.reply_text("Por enquanto só leio PDF e imagens (JPG, PNG, WebP ou GIF).")
+            await gateway.send_text(chat_id, "Por enquanto só leio PDF e imagens (JPG, PNG, WebP ou GIF).")
             return
         if (item.file_size or 0) > reader.MAX_FILE_BYTES:
-            await msg.reply_text("Esse arquivo passa do limite de 20 MB.")
+            await gateway.send_text(chat_id, "Esse arquivo passa do limite de 20 MB.")
             return
 
-        typing = asyncio.create_task(self._keep_typing(update))
-        try:
-            tg_file = await context.bot.get_file(item.file_id)
-            data = bytes(await tg_file.download_as_bytearray())
-            text = await asyncio.to_thread(self.read_document, data, filename, mime)
-        except reader.ReaderError as exc:
-            await msg.reply_text(f"Não consegui ler esse arquivo. {exc}")
-            return
-        except Exception as exc:  # noqa: BLE001
-            print(f"[bot] erro ao baixar o arquivo: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-            await msg.reply_text("Não consegui baixar o arquivo agora. Tente de novo em instantes.")
-            return
-        finally:
-            typing.cancel()
-
-        att = self.registry.add(
-            file_id=item.file_id, file_unique_id=item.file_unique_id, kind=kind,
-            chat_id=update.effective_chat.id, message_id=msg.message_id, filename=filename,
-            mime=mime, size=item.file_size or len(data), caption=msg.caption or "",
+        att = self.registry.add(  # grava o anexo já, para poder baixar de novo se o bot cair
+            file_id=item.file_id, file_unique_id=item.file_unique_id, kind=kind, chat_id=chat_id,
+            message_id=msg.message_id, filename=filename, mime=mime, size=item.file_size or 0,
+            caption=msg.caption or "",
         )
-        message = reader.format_attachment_message(att.ref, filename, msg.caption or "", text)
-        await self._respond(update, context, message, [att.id])
+        stored = self.conversation.ingest(
+            reader.format_placeholder(att.ref, filename, att.caption), attachments=[att.id], status=READING)
+        async with gateway.typing(chat_id):
+            await gateway.send_text(chat_id, FILE_NOTICE)
+            async with self._lock:
+                await self._read_and_answer(gateway, chat_id, stored.id, att)
 
-    async def on_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if self._authorized(update):
-            await self._reply(update, self.conversation.status())
+    # ---- núcleo (usado ao vivo e na recuperação) -----------------------------
 
-    async def on_curate(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._authorized(update):
+    async def _read_and_answer(self, gateway, chat_id: int, msg_id: int, att) -> None:
+        """Baixa e lê o arquivo; com o conteúdo pronto, passa para a resposta."""
+        try:
+            data = await gateway.download(att.file_id)
+            text = await asyncio.to_thread(self.read_document, data, att.filename, att.mime)
+        except reader.ReaderError as exc:
+            self.conversation.fail(msg_id, text=reader.format_unreadable(att.ref, att.filename, att.caption))
+            await gateway.send_text(chat_id, f"Não consegui ler esse arquivo. {exc}")
             return
-        await update.effective_chat.send_action(ChatAction.TYPING)
-        await self._reply(update, await asyncio.to_thread(self.conversation.curate_now))
+        except Exception as exc:  # noqa: BLE001 - nunca expõe detalhes internos no chat
+            print(f"[bot] erro ao baixar o arquivo: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            self.conversation.fail(msg_id, text=reader.format_unreadable(att.ref, att.filename, att.caption))
+            await gateway.send_text(chat_id, "Não consegui baixar o arquivo agora. Tente de novo em instantes.")
+            return
+        self.conversation.set_content(msg_id, reader.format_attachment_message(att.ref, att.filename, att.caption, text))
+        await self._answer(gateway, chat_id, msg_id)
 
-    async def on_unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if self._authorized(update):
-            await update.message.reply_text(f"Comando desconhecido. {HELP}")
+    async def _answer(self, gateway, chat_id: int, msg_id: int) -> None:
+        """Passa a mensagem ao agente de resposta, responde e reenvia os arquivos pedidos."""
+        try:
+            result = await asyncio.to_thread(self.conversation.respond_to, msg_id)
+        except Exception as exc:  # noqa: BLE001 - nunca expõe detalhes internos no chat
+            print(f"[bot] erro ao responder: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            self.conversation.fail(msg_id)
+            await gateway.send_text(chat_id, ERROR_REPLY)
+            return
+        if self.verbose:
+            self._log_trace(result)
+        await gateway.send_text(chat_id, result.text)
+        for att in result.files:
+            try:
+                await gateway.send_file(chat_id, att)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[bot] erro ao reenviar {att.ref}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                await gateway.send_text(chat_id, f"Não consegui reenviar o arquivo {att.filename}.")
+
+    @staticmethod
+    def _log_trace(result) -> None:
+        """Modo --verbose: mostra no console o que o agente consultou para responder."""
+        for event in result.trace:
+            args = ", ".join(f"{k}={v!r}" for k, v in event.args.items())
+            print(f"  [memória] {event.name}({args})", flush=True)
+        for att in result.files:
+            print(f"  [arquivo] reenviando {att.ref} ({att.filename})", flush=True)
+
+    # ---- recuperação depois de uma queda -------------------------------------
+
+    async def recover(self, gateway, now: datetime | None = None) -> None:
+        """Ao iniciar, retoma as mensagens que ficaram sem resposta (o bot caiu no meio).
+        As mais antigas que RECOVERY_MAX_AGE são descartadas (viram `failed`)."""
+        chat_id = self.allowed_user_id
+        if chat_id is None:
+            return
+        now = now or datetime.now().astimezone()
+        fresh = []
+        for msg in self.conversation.unfinished():
+            if now - datetime.fromisoformat(msg.at) > RECOVERY_MAX_AGE:
+                self.conversation.fail(msg.id)
+            else:
+                fresh.append(msg)
+        if not fresh:
+            return
+        await gateway.send_text(chat_id, RECOVERY_NOTICE)
+        for msg in fresh:
+            async with gateway.typing(chat_id):
+                async with self._lock:
+                    await self._resume(gateway, chat_id, msg)
+
+    async def _resume(self, gateway, chat_id: int, msg) -> None:
+        if msg.status != READING:  # received/ready: o conteúdo já está no histórico
+            await self._answer(gateway, chat_id, msg.id)
+            return
+        att = self.registry.get(msg.attachments[0]) if self.registry and msg.attachments else None
+        if att is None:
+            self.conversation.fail(msg.id)
+            await gateway.send_text(chat_id, "Não consegui retomar um arquivo que você enviou antes; envie de novo.")
+            return
+        await self._read_and_answer(gateway, chat_id, msg.id, att)
+
+
+# ---- aplicação -------------------------------------------------------------
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     print(f"[bot] erro: {context.error!r}", file=sys.stderr, flush=True)
-
-
-COMMANDS = [
-    BotCommand("status", "Mostra o estado da memória e das mensagens pendentes"),
-    BotCommand("curate", "Processa agora as mensagens pendentes na memória"),
-]
-
-
-async def register_commands(bot, allowed_user_id: int | None) -> None:
-    """Publica a lista de comandos (menu "/" do Telegram). Com usuário autorizado, só
-    ele vê o menu; sem ele, vale o escopo padrão. Falha aqui não impede o bot de rodar."""
-    scope = BotCommandScopeChat(chat_id=allowed_user_id) if allowed_user_id else None
-    try:
-        await bot.set_my_commands(COMMANDS, scope=scope)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[bot] não consegui registrar os comandos no Telegram: {type(exc).__name__}: {exc}",
-              file=sys.stderr, flush=True)
 
 
 async def notify_outcome(app: Application, outcome) -> None:
@@ -252,24 +262,34 @@ async def notify_outcome(app: Application, outcome) -> None:
     else:
         app.bot_data["failure_notified"] = False
     try:
-        for chunk in split_message(to_plain(text)):
-            await app.bot.send_message(chat_id=allowed, text=chunk)
+        await app.bot_data["gateway"].send_text(allowed, text)
     except Exception as exc:  # noqa: BLE001 - falhar ao avisar não pode derrubar o bot
         print(f"[bot] não consegui enviar o relatório: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
 
+async def _safe_recover(handlers: BotHandlers, gateway) -> None:
+    try:
+        await handlers.recover(gateway)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[bot] erro ao retomar mensagens pendentes: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+
 async def post_init(app: Application) -> None:
-    """Registra os comandos e liga o laço que dispara o Curator por inatividade."""
-    await register_commands(app.bot, app.bot_data.get("allowed_user_id"))
+    """Registra os comandos, liga o laço do Curator e retoma mensagens sem resposta."""
+    gateway = app.bot_data["gateway"]
+    await gateway.register_commands(COMMANDS, app.bot_data.get("allowed_user_id"))
     stop = asyncio.Event()
-    service = app.bot_data["service"]
     app.bot_data["stop"] = stop
     app.bot_data["watcher"] = asyncio.create_task(
-        service.watch(stop, WATCH_INTERVAL, on_outcome=lambda outcome: notify_outcome(app, outcome))
+        app.bot_data["service"].watch(stop, WATCH_INTERVAL, on_outcome=lambda outcome: notify_outcome(app, outcome))
     )
+    app.bot_data["recovery"] = asyncio.create_task(_safe_recover(app.bot_data["handlers"], gateway))
 
 
 async def post_shutdown(app: Application) -> None:
+    recovery = app.bot_data.get("recovery")
+    if recovery is not None and not recovery.done():
+        recovery.cancel()
     stop, watcher = app.bot_data.get("stop"), app.bot_data.get("watcher")
     if stop is None or watcher is None:
         return
@@ -281,9 +301,14 @@ async def post_shutdown(app: Application) -> None:
 
 
 def build_application(token: str, handlers: BotHandlers, service) -> Application:
-    app = Application.builder().token(token).post_init(post_init).post_shutdown(post_shutdown).build()
+    # concurrent_updates: sem isso a biblioteca trata uma mensagem por vez, e um arquivo lento
+    # seguraria até a gravação e o "digitando..." da mensagem seguinte.
+    app = (Application.builder().token(token).concurrent_updates(True)
+           .post_init(post_init).post_shutdown(post_shutdown).build())
     app.bot_data["service"] = service
+    app.bot_data["handlers"] = handlers
     app.bot_data["allowed_user_id"] = handlers.allowed_user_id
+    app.bot_data["gateway"] = handlers.gateway_factory(app.bot)
     app.add_handler(CommandHandler("start", handlers.on_start))
     app.add_handler(CommandHandler("status", handlers.on_status))
     app.add_handler(CommandHandler("curate", handlers.on_curate))

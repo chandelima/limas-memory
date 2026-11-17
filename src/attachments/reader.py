@@ -96,10 +96,23 @@ def read_document(data: bytes, filename: str, mime: str, llm=None) -> str:
     return text
 
 
-def format_attachment_message(ref: str, filename: str, caption: str, text: str) -> str:
-    """Texto que entra no histórico (e, depois, vai para o Curator) para um arquivo recebido."""
+def _header(ref: str, filename: str, caption: str) -> list[str]:
     lines = [f"[Arquivo enviado: {filename} ({ref})]"]
     if caption.strip():
         lines.append(f"Legenda: {caption.strip()}")
-    lines += ["Conteúdo extraído do arquivo:", text]
-    return "\n".join(lines)
+    return lines
+
+
+def format_attachment_message(ref: str, filename: str, caption: str, text: str) -> str:
+    """Texto que entra no histórico (e, depois, vai para o Curator) para um arquivo recebido."""
+    return "\n".join([*_header(ref, filename, caption), "Conteúdo extraído do arquivo:", text])
+
+
+def format_placeholder(ref: str, filename: str, caption: str) -> str:
+    """Texto provisório, gravado assim que o arquivo chega e enquanto ele é lido."""
+    return "\n".join([*_header(ref, filename, caption), "(lendo o arquivo...)"])
+
+
+def format_unreadable(ref: str, filename: str, caption: str) -> str:
+    """Texto final quando não foi possível ler o arquivo."""
+    return "\n".join([*_header(ref, filename, caption), "(não foi possível ler o arquivo)"])
