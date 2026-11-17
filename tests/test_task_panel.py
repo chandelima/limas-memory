@@ -94,16 +94,17 @@ def test_multi_day_panel_prefixes_every_dated_task_with_today_tomorrow_or_date(t
 LONG = "Medical appointment with Dr. Francisco Patriota at ProntoMED, bring the exams and the insurance card"
 
 
-def test_the_detail_card_shows_the_full_text_state_when_and_the_two_buttons(tasks):
+def test_the_detail_card_shows_the_full_text_state_when_and_the_buttons(tasks):
     task = tasks.add(LONG + " #health", date(2026, 11, 19), time(8, 0))
     text, rows = panel.build_detail(tasks, task.id, TODAY, "week", "health")
     assert text.splitlines()[0] == LONG + " #health"  # nothing is cut
     assert "⭕ Not done yet" in text and "When: Tomorrow 08:00" in text
-    (toggle_label, toggle_data), (back_label, back_data) = rows[0][0], rows[1][0]
-    assert toggle_label == "🟢 Mark as done" and back_label == "⬅️ Back to the list"
+    (toggle_label, toggle_data), (remove_label, remove_data), (back_label, back_data) = rows[0][0], rows[1][0], rows[2][0]
+    assert toggle_label == "🟢 Mark as done" and remove_label == "🗑️ Remove task" and back_label == "⬅️ Back to the list"
+    assert panel.decode(remove_data) == panel.Action("tr", task.id, TODAY, "week", "health")
     assert panel.decode(toggle_data) == panel.Action("tt", task.id, TODAY, "week", "health")
     assert panel.decode(back_data) == panel.Action("tb", "", None, "week", "health")
-    assert all(len(d.encode()) <= 64 for _, d in (rows[0][0], rows[1][0]))
+    assert all(len(d.encode()) <= 64 for row in rows for _, d in row)
 
 
 def test_the_card_follows_the_state_and_covers_recurring_undated_and_linked_tasks(tasks):
@@ -128,3 +129,26 @@ def test_the_card_of_a_missing_task_is_an_error(tasks):
 def test_back_callback_roundtrip_and_garbage():
     assert panel.decode(panel.encode_back("pending", "")) == panel.Action("tb", "", None, "pending", "")
     assert panel.decode("tb::::x:") is None and panel.decode("tt:a1b2:20261118:q:") is None
+
+
+def test_a_completed_one_off_task_has_no_remove_button_but_recurring_ones_do(tasks):
+    one = tasks.add("Buy bread")
+    tasks.complete(one.id)
+    assert [r[0][0] for r in panel.build_detail(tasks, one.id, TODAY)[1]] == ["⭕ Mark as not done", "⬅️ Back to the list"]
+    rec = tasks.add("Medication", recurrence=Recurrence.parse("daily"))
+    assert "🗑️ Remove task" in [r[0][0] for r in panel.build_detail(tasks, rec.id, TODAY)[1]]
+
+
+def test_removal_asks_for_confirmation_first_and_cancel_goes_back_to_the_card(tasks):
+    task = tasks.add(LONG + " #health", TODAY)
+    text, rows = panel.build_confirm_remove(tasks, task.id, TODAY, "pending", "health")
+    assert text.startswith("Remove this task?") and LONG in text
+    assert [r[0][0] for r in rows] == ["🗑️ Yes, remove it", "Cancel"]
+    assert panel.decode(rows[0][0][1]).kind == "tx" and panel.decode(rows[1][0][1]).kind == "tk"  # cancel = open the card
+    assert [x.id for x in tasks.load().pending] == [task.id]  # asking removes nothing
+    assert panel.remove(tasks, task.id) == LONG
+    assert tasks.load().pending == []
+    with pytest.raises(TaskError):
+        panel.build_confirm_remove(tasks, task.id, TODAY)
+    with pytest.raises(Exception):
+        panel.remove(tasks, task.id)

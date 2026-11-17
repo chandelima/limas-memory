@@ -669,7 +669,7 @@ def test_todo_command_sends_the_panel_a_tap_opens_the_card_and_the_card_toggles_
     run(todo_env.handlers.on_task_action(make_query(rows[0][0][1]), env.ctx))  # ... tapping it opens the card
     card, card_rows = env.gw.edits[-1][2], env.gw.edits[-1][3]
     assert env.gw.edits[-1][1] == 900 and card.startswith(long_text) and "Not done yet" in card  # full text
-    assert [r[0][0] for r in card_rows] == ["🟢 Mark as done", "⬅️ Back to the list"]
+    assert [r[0][0] for r in card_rows] == ["🟢 Mark as done", "🗑️ Remove task", "⬅️ Back to the list"]
     assert [t.id for t in todo_env.tasks.load().pending] == [task.id]  # opening changes nothing
     run(todo_env.handlers.on_task_action(make_query(card_rows[0][0][1]), env.ctx))  # check it off
     assert env.gw.answers[-1][1].startswith("🟢 Completed")
@@ -678,7 +678,7 @@ def test_todo_command_sends_the_panel_a_tap_opens_the_card_and_the_card_toggles_
     run(todo_env.handlers.on_task_action(make_query(card_rows[0][0][1]), env.ctx))  # the same button undoes it
     assert env.gw.answers[-1][1].startswith("⭕ Reopened") and "Not done yet" in env.gw.edits[-1][2]
     assert [t.id for t in todo_env.tasks.load().pending] == [task.id]
-    run(todo_env.handlers.on_task_action(make_query(card_rows[1][0][1]), env.ctx))  # back to the list
+    run(todo_env.handlers.on_task_action(make_query(env.gw.edits[-1][3][2][0][1]), env.ctx))  # back to the list (3rd button)
     assert "Tap a task to open it" in env.gw.edits[-1][2] and env.gw.edits[-1][3][0][0][0].startswith("⭕")
 
 
@@ -748,3 +748,25 @@ def test_telegram_requests_use_generous_timeouts(env):
     timeouts = request._client.timeout  # httpx.Timeout
     assert timeouts.connect == bot.NETWORK_TIMEOUT and timeouts.read == bot.NETWORK_TIMEOUT
     assert bot.NETWORK_TIMEOUT > 5  # the library default
+
+
+def test_removing_a_task_from_its_card_asks_first_and_only_the_confirmation_removes_it(todo_env):
+    from datetime import date as _date
+    task = todo_env.tasks.add("Replace the IoT module", _date(2026, 11, 18))
+    other = todo_env.tasks.add("Buy bread", _date(2026, 11, 18))
+    env = todo_env.env
+    run(todo_env.handlers.on_task_action(make_query(f"tk:{task.id}:20261118:t:"), env.ctx))
+    remove_data = env.gw.edits[-1][3][1][0][1]  # the "Remove task" button
+    run(todo_env.handlers.on_task_action(make_query(remove_data), env.ctx))  # asks first
+    ask_text, ask_rows = env.gw.edits[-1][2], env.gw.edits[-1][3]
+    assert ask_text.startswith("Remove this task?") and "Replace the IoT module" in ask_text
+    assert {t.id for t in todo_env.tasks.load().pending} == {task.id, other.id}  # nothing removed yet
+    run(todo_env.handlers.on_task_action(make_query(ask_rows[1][0][1]), env.ctx))  # Cancel: back to the card
+    assert "Not done yet" in env.gw.edits[-1][2] and {t.id for t in todo_env.tasks.load().pending} == {task.id, other.id}
+    run(todo_env.handlers.on_task_action(make_query(remove_data), env.ctx))
+    run(todo_env.handlers.on_task_action(make_query(env.gw.edits[-1][3][0][0][1]), env.ctx))  # Yes, remove it
+    assert env.gw.answers[-1][1].startswith("🗑️ Removed: Replace the IoT module")
+    assert [t.id for t in todo_env.tasks.load().pending] == [other.id]
+    assert "Tap a task to open it" in env.gw.edits[-1][2]  # back on the (now shorter) list
+    run(todo_env.handlers.on_task_action(make_query(f"tx:{task.id}:20261118:t:"), env.ctx))  # again: already gone
+    assert "Could not" in env.gw.answers[-1][1] and [t.id for t in todo_env.tasks.load().pending] == [other.id]

@@ -10,6 +10,8 @@ callback_data (all fit in Telegram's 64 bytes):
   tk:<id>:<YYYYMMDD>:<scope>:<tag>   open the detail card
   tt:<id>:<YYYYMMDD>:<scope>:<tag>   toggle done / not done (from the card)
   tb::::<scope>:<tag>                back to the list
+  tr:<id>:<YYYYMMDD>:<scope>:<tag>   ask to confirm removing the task
+  tx:<id>:<YYYYMMDD>:<scope>:<tag>   remove it (after the confirmation)
 """
 
 from dataclasses import dataclass
@@ -26,7 +28,7 @@ PANEL_SCOPES = {"today": "t", "week": "w", "pending": "p"}
 _SCOPE_NAMES = {v: k for k, v in PANEL_SCOPES.items()}
 MAX_BUTTONS = 40
 LABEL_MAX = 56
-OPEN, TOGGLE, BACK = "tk", "tt", "tb"
+OPEN, TOGGLE, BACK, ASK_REMOVE, REMOVE = "tk", "tt", "tb", "tr", "tx"
 
 
 @dataclass
@@ -101,9 +103,13 @@ def encode(item: PanelItem, scope: str, tag: str = "") -> str:
     return f"{OPEN}:{item.id}:{item.on:%Y%m%d}:{PANEL_SCOPES[scope]}:{tag}"[:64]
 
 
-def encode_toggle(task_id: str, on: date, scope: str, tag: str = "") -> str:
+def encode_action(kind: str, task_id: str, on: date, scope: str, tag: str = "") -> str:
     tag = model.normalize_tag(tag) if tag else ""
-    return f"{TOGGLE}:{task_id}:{on:%Y%m%d}:{PANEL_SCOPES[scope]}:{tag}"[:64]
+    return f"{kind}:{task_id}:{on:%Y%m%d}:{PANEL_SCOPES[scope]}:{tag}"[:64]
+
+
+def encode_toggle(task_id: str, on: date, scope: str, tag: str = "") -> str:
+    return encode_action(TOGGLE, task_id, on, scope, tag)
 
 
 def encode_back(scope: str, tag: str = "") -> str:
@@ -112,7 +118,7 @@ def encode_back(scope: str, tag: str = "") -> str:
 
 
 class Action(NamedTuple):
-    kind: str  # OPEN | TOGGLE | BACK
+    kind: str  # OPEN | TOGGLE | BACK | ASK_REMOVE | REMOVE
     id: str
     day: date | None
     scope: str
@@ -122,7 +128,7 @@ class Action(NamedTuple):
 def decode(data: str) -> Action | None:
     """The action behind a callback_data, or None if it is not a valid task callback."""
     parts = data.split(":", 4)
-    if len(parts) != 5 or parts[0] not in (OPEN, TOGGLE, BACK):
+    if len(parts) != 5 or parts[0] not in (OPEN, TOGGLE, BACK, ASK_REMOVE, REMOVE):
         return None
     if parts[0] == BACK:  # tb::::<scope>:<tag>  (the id and day slots are empty)
         rest = data.split(":", 5)
@@ -178,9 +184,28 @@ def build_detail(tasks: TaskStore, task_id: str, on: date, scope: str = "today",
         lines.append(t("detail_no_date"))
     if item.ref:
         lines.append(t("detail_see", ref=item.ref))
-    rows = [[(t("btn_reopen" if done else "btn_complete"), encode_toggle(task_id, on, scope, tag))],
-            [(t("btn_back"), encode_back(scope, tag))]]
+    rows = [[(t("btn_reopen" if done else "btn_complete"), encode_toggle(task_id, on, scope, tag))]]
+    if not done:  # a completed one-off task is history: only pending and recurring ones can be removed
+        rows.append([(t("btn_remove"), encode_action(ASK_REMOVE, task_id, on, scope, tag))])
+    rows.append([(t("btn_back"), encode_back(scope, tag))])
     return "\n".join(lines), rows
+
+
+def build_confirm_remove(tasks: TaskStore, task_id: str, on: date, scope: str = "today", tag: str = ""
+                         ) -> tuple[str, list[list[tuple[str, str]]]]:
+    """Ask before removing: removing a task cannot be undone (a recurring one loses its definition)."""
+    tl = tasks.load()
+    item = next((x for x in (*tl.pending, *tl.recurring) if x.id == task_id), None)
+    if item is None:
+        raise TaskError(t("task_gone"))
+    rows = [[(t("btn_confirm_remove"), encode_action(REMOVE, task_id, on, scope, tag))],
+            [(t("btn_cancel"), encode_action(OPEN, task_id, on, scope, tag))]]
+    return t("confirm_remove", text=with_tags(item.text, item.tags)), rows
+
+
+def remove(tasks: TaskStore, task_id: str) -> str:
+    """Remove a pending or recurring task. Return its text."""
+    return tasks.remove(task_id).text
 
 
 def toggle(tasks: TaskStore, task_id: str, on: date) -> tuple[str, bool]:

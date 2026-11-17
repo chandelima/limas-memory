@@ -148,7 +148,7 @@ class BotHandlers:
             await gateway.send_text(chat_id, text)
 
     async def on_task_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """A tap in the task panel: open a task's card, check/uncheck it from the card, or go back."""
+        """A tap in the task panel: open a task's card, check/uncheck it, remove it (with a confirmation) or go back."""
         query = update.callback_query
         if query is None or not self._authorized(update) or self.tasks is None:
             return
@@ -162,8 +162,14 @@ class BotHandlers:
             if parsed.kind == panel.TOGGLE:
                 text, done = await asyncio.to_thread(panel.toggle, self.tasks, parsed.id, parsed.day)
                 notice = t("task_completed" if done else "task_reopened", text=text)
-            if parsed.kind == panel.BACK:
+            if parsed.kind == panel.REMOVE:
+                removed = await asyncio.to_thread(panel.remove, self.tasks, parsed.id)
+                notice = t("task_removed", text=removed)
+            if parsed.kind in (panel.BACK, panel.REMOVE):
                 new_text, rows = await asyncio.to_thread(panel.build_panel, self.tasks, parsed.scope, parsed.tag)
+            elif parsed.kind == panel.ASK_REMOVE:
+                new_text, rows = await asyncio.to_thread(
+                    panel.build_confirm_remove, self.tasks, parsed.id, parsed.day, parsed.scope, parsed.tag)
             else:  # open, or toggle (which stays on the card, now showing the new state)
                 new_text, rows = await asyncio.to_thread(
                     panel.build_detail, self.tasks, parsed.id, parsed.day, parsed.scope, parsed.tag)
@@ -471,7 +477,7 @@ def build_application(token: str, handlers: BotHandlers, service) -> Application
     app.add_handler(CommandHandler("status", handlers.on_status))
     app.add_handler(CommandHandler("curate", handlers.on_curate))
     app.add_handler(CommandHandler("todo", handlers.on_todo))
-    app.add_handler(CallbackQueryHandler(handlers.on_task_action, pattern=r"^t[ktb]:"))
+    app.add_handler(CallbackQueryHandler(handlers.on_task_action, pattern=r"^t[ktbrx]:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.on_message))
     app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, handlers.on_file))
     app.add_handler(MessageHandler(filters.COMMAND, handlers.on_unknown))  # always last
