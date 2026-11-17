@@ -10,14 +10,35 @@ from pathlib import Path
 
 from applog import get_logger
 from conversation.log import ANSWERED, FAILED, READY, RECEIVED, ConversationLog, Message
-from curator.agent import build_curator, curate
+from curator.agent import ToolEvent, build_curator, curate
 from curator.service import CurationService, Outcome, to_chat
-from curator.tools import default_tools
+from curator.tools import default_tools, make_store_and_git
 from responder.agent import ReplyResult, reply
 
 log = get_logger("responder")
 
 HISTORY_MESSAGES = 30  # quantas mensagens recentes o agente de resposta enxerga
+
+
+SYNC_MESSAGE = "sync: registra alterações feitas fora do Curator (tarefas, anexos)"
+
+
+def sync_memory(memory_dir: Path | None) -> ToolEvent | None:
+    """Depois de cada curadoria: commita o que mudou fora dela (tarefas e anexos são gravados
+    direto pelas tools do agente de resposta) e envia ao remote o que ainda não subiu.
+    Sem nada a fazer, devolve None; falha de git nunca derruba a curadoria."""
+    try:
+        _, git = make_store_and_git(memory_dir)
+        result = git.sync(SYNC_MESSAGE)
+    except Exception as exc:  # noqa: BLE001
+        return ToolEvent("sync_memory", {}, f"ERRO: {type(exc).__name__}: {exc}")
+    if result.sha is None and result.pushed and not result.push_error:
+        return ToolEvent("sync_memory", {}, "OK: repositório já estava em dia com o remote.")
+    if result.pushed:
+        return ToolEvent("sync_memory", {}, f"OK: {'commit ' + result.sha + ' e ' if result.sha else ''}enviado ao remote.")
+    if result.sha is None and "Sem remote" in result.push_error:
+        return None
+    return ToolEvent("sync_memory", {}, f"OK: salvo localmente. Push pendente: {result.push_error}")
 
 
 def build_service(
@@ -32,7 +53,11 @@ def build_service(
     def curate_fn(messages, context, channel):
         if "agent" not in cache:
             cache["agent"] = build_curator(tools=default_tools(memory_dir))
-        return curate(messages, context, agent=cache["agent"], channel=channel)
+        result = curate(messages, context, agent=cache["agent"], channel=channel)
+        sync = sync_memory(memory_dir)
+        if sync is not None:
+            result.trace.append(sync)
+        return result
 
     return CurationService(log, curate_fn, channel=channel, idle_seconds=idle_seconds)
 

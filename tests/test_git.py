@@ -133,3 +133,24 @@ def test_push_with_token_still_works_on_local_remote(mem, remote):
     mem.mkdir()
     (mem / "a.md").write_text("oi\n", encoding="utf-8")
     assert g.commit_and_push("docs: a").pushed
+
+
+def test_sync_pushes_old_local_commits_and_new_changes_when_remote_is_configured_late(mem, remote):
+    local = MemoryGit(mem)  # sem remote: o commit fica só local
+    mem.mkdir(exist_ok=True)
+    (mem / "a.md").write_text("oi\n", encoding="utf-8")
+    assert local.commit_and_push("docs: antigo").pushed is False
+    (mem / "todo.md").write_text("- [ ] x\n", encoding="utf-8")  # mudança fora do Curator
+    result = MemoryGit(mem, remote=str(remote)).sync("sync: tarefas")
+    assert result.sha and result.pushed
+    assert run(remote, "log", "--format=%s", "main").splitlines() == ["sync: tarefas", "docs: antigo"]
+
+
+def test_sync_without_changes_still_succeeds_and_empty_repo_does_nothing(mem, remote):
+    g = MemoryGit(mem, remote=str(remote))
+    assert g.sync("sync").sha is None and g.head() is None  # sem commits: nada a enviar
+    mem.mkdir(exist_ok=True)
+    (mem / "a.md").write_text("oi\n", encoding="utf-8")
+    g.commit_and_push("docs: a")
+    result = g.sync("sync")
+    assert result.sha is None and result.pushed and result.push_error == ""

@@ -148,7 +148,7 @@ class CurationService:
         cost = f"US$ {usage.cost:.4f}" if usage.cost_reported else "n/d"
         log.info("curadoria concluída: %d mensagem(ns), %d chamada(s) de tool, %d tokens, custo %s, %.1fs",
                  count, len(result.trace), usage.total_tokens, cost, seconds)
-        commits = [e.result for e in result.trace if e.name == "commit_memory"]
+        commits = [e.result for e in result.trace if e.name in ("commit_memory", "sync_memory")]
         pending = next((r for r in commits if "Push pendente" in r), None)
         if pending is not None:
             reason = pending.split("Push pendente:", 1)[-1].strip()[:200]
@@ -157,7 +157,7 @@ class CurationService:
                 log.warning("push da memória pendente: %s", reason)
             else:
                 log.debug("push da memória ainda pendente: %s", reason)
-        elif any("enviado ao remote" in r for r in commits):
+        elif any("enviado ao remote" in r or "em dia com o remote" in r for r in commits):
             self._last_push_warning = ""
 
     async def watch(

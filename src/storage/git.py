@@ -143,6 +143,17 @@ class MemoryGit:
         pushed, error = self.push()
         return CommitResult(sha=sha, pushed=pushed, push_error=error)
 
+    def sync(self, message: str) -> CommitResult:
+        """Como `commit_and_push`, mas tenta o push mesmo sem mudanças novas: envia commits
+        locais que ainda não subiram (ex.: remote configurado depois). Só mexe no repo e
+        no remote se houver o que enviar; "Everything up-to-date" conta como sucesso."""
+        self.ensure_repo()
+        sha = self.commit(message)
+        if self.head() is None:
+            return CommitResult(sha=None, pushed=False)  # repo sem nenhum commit
+        pushed, error = self.push()
+        return CommitResult(sha=sha, pushed=pushed, push_error=error)
+
     def log(self, limit: int = 10) -> list[str]:
         """Últimos commits ('sha assunto'), mais recentes primeiro."""
         proc = self._git("log", f"-{limit}", "--format=%h %s")
