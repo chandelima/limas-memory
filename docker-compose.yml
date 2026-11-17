@@ -1,7 +1,6 @@
 services:
   bot:
-    build: .
-    image: limas-memory
+    build: .   # no `image:` here: with it, `compose pull` would try to download "limas-memory" from Docker Hub
     restart: unless-stopped
     # No env_file: Portainer (stack from a Git repository) has no .env in the checkout.
     # The values come from the environment of the stack (Portainer: "Environment variables";
