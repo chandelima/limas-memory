@@ -3,3 +3,4 @@ langchain-openai
 python-dotenv
 pyyaml
 pytest
+python-telegram-bot

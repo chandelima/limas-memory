@@ -27,3 +27,8 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 # Histórico da conversa (JSON, fora de memory/ e não versionado) e gatilho do Curator
 CONVERSATION_FILE = Path(os.getenv("CONVERSATION_FILE", ROOT / "data" / "conversa.json")).resolve()
 CURATOR_IDLE_SECONDS = float(os.getenv("CURATOR_IDLE_SECONDS", "600"))
+
+# Bot do Telegram: token do BotFather e o ID numérico do único usuário autorizado
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+_allowed = os.getenv("TELEGRAM_ALLOWED_USER_ID", "").strip()
+TELEGRAM_ALLOWED_USER_ID = int(_allowed) if _allowed.isdigit() else None

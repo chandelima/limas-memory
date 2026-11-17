@@ -1,4 +1,5 @@
 import chat as chat_cli
+import chatflow
 from conversation.log import ConversationLog
 from curator.agent import CurateResult, ToolEvent
 from curator.service import CurationService, Outcome
@@ -26,7 +27,7 @@ def run_chat(tmp_path, inputs, monkeypatch, replies=None, service=None, extra=No
         seen.append([(m.role, m.text) for m in history])
         return ReplyResult(text=next(texts, "ok"))
 
-    monkeypatch.setattr(chat_cli, "reply", fake_reply)
+    monkeypatch.setattr(chatflow, "reply", fake_reply)
     it = iter(inputs)
     log_path = tmp_path / "conversa.json"
     args = ["--log", str(log_path), "--memory-dir", str(tmp_path / "mem")] + (extra or [])

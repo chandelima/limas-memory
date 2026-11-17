@@ -1,8 +1,7 @@
 """Chat no terminal: agente de resposta + histórico em arquivo + Curator por inatividade.
 
-Simula, no terminal, o que o bot do Telegram fará: cada mensagem vai para o histórico
-(JSON), o agente de resposta consulta a memória (só leitura) e, depois de um tempo sem
-mensagens, o Curator processa o que ficou pendente e atualiza a memória.
+Ferramenta de desenvolvimento: simula no terminal o mesmo fluxo do bot do Telegram
+(src/bot.py), útil para testar prompts e memória sem o Telegram.
 
 Uso:
     python src/chat.py
@@ -18,48 +17,12 @@ import threading
 from pathlib import Path
 
 import config
+from chatflow import Conversation, build_service, describe_outcome, describe_status  # noqa: F401
 from conversation.log import ConversationLog
-from curator.agent import build_curator, curate
-from curator.service import CurationService, Outcome, to_chat
-from curator.tools import default_tools
-from responder.agent import build_responder, default_read_tools, reply
+from responder.agent import build_responder, default_read_tools
 
 EXIT_WORDS = {"sair", "exit", "quit"}
-HISTORY_MESSAGES = 30  # quantas mensagens recentes o agente de resposta enxerga
 WATCH_INTERVAL = 5  # segundos entre verificações de inatividade
-
-
-def build_service(log: ConversationLog, memory_dir: Path | None, idle_seconds: float) -> CurationService:
-    """Serviço de curadoria; o agente do Curator só é criado na primeira vez que roda."""
-    cache: dict = {}
-
-    def curate_fn(messages, context, channel):
-        if "agent" not in cache:
-            cache["agent"] = build_curator(tools=default_tools(memory_dir))
-        return curate(messages, context, agent=cache["agent"], channel=channel)
-
-    return CurationService(log, curate_fn, channel="terminal", idle_seconds=idle_seconds)
-
-
-def describe_outcome(outcome: Outcome) -> str:
-    if outcome.error:
-        return f"[curador] falhou; {outcome.messages} mensagem(ns) seguem pendentes: {outcome.error}"
-    tools = " -> ".join(outcome.result.tool_calls) or "nenhuma tool"
-    return (
-        f"[curador] {outcome.messages} mensagem(ns) processada(s) ({tools})\n"
-        f"{outcome.result.report}"
-    )
-
-
-def describe_status(service: CurationService) -> str:
-    pending = len(service.log.pending())
-    idle = service.seconds_idle()
-    parts = [f"pendentes: {pending}"]
-    if idle is not None:
-        parts.append(f"inativo há {idle:.0f}s (curadoria após {service.idle_seconds:.0f}s)")
-    if service.last_error:
-        parts.append(f"último erro: {service.last_error}")
-    return "[status] " + " | ".join(parts)
 
 
 def main(argv=None, agent=None, read=input, service=None, start_watcher=True) -> int:
@@ -82,7 +45,8 @@ def main(argv=None, agent=None, read=input, service=None, start_watcher=True) ->
 
     # Um serviço recebido já traz o seu histórico; usamos o mesmo objeto para não divergir.
     log = service.log if service else ConversationLog(args.log or config.CONVERSATION_FILE)
-    service = service or build_service(log, args.memory_dir, args.idle_seconds)
+    service = service or build_service(log, args.memory_dir, args.idle_seconds, channel="terminal")
+    conversation = Conversation(log, service, agent)
     memory_dir = args.memory_dir or config.MEMORY_DIR
 
     stop = threading.Event()
@@ -109,20 +73,17 @@ def main(argv=None, agent=None, read=input, service=None, start_watcher=True) ->
             if not text:
                 continue
             if text == "/status":
-                print(describe_status(service) + "\n")
+                print(conversation.status() + "\n")
                 continue
             if text == "/curar":
-                outcome = service.run_now()
-                print((describe_outcome(outcome) if outcome else "[curador] nada pendente.") + "\n")
+                print(conversation.curate_now() + "\n")
                 continue
 
-            log.append("usuario", text)
-            result = reply([to_chat(m) for m in log.recent(HISTORY_MESSAGES)], agent=agent)
+            result = conversation.respond(text)
             if args.verbose:
                 for event in result.trace:
                     print(f"  [memória] {event.name}({', '.join(f'{k}={v!r}' for k, v in event.args.items())})")
             print(f"IA: {result.text}\n")
-            log.append("assistente", result.text)
     finally:
         stop.set()
 
