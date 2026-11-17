@@ -1,7 +1,7 @@
 """CLI para testar o Memory Curator com uma conversa de exemplo.
 
 Uso:
-    python src/curate.py examples/02_fato_novo.txt
+    python src/curate.py evals/scenarios/02_fato_novo.txt
     python src/curate.py conversa.txt --context "Papo sobre hábitos"
     type conversa.txt | python src/curate.py -
     python src/curate.py ex.txt --memory-dir D:/tmp/memoria-teste   # não toca na memória real

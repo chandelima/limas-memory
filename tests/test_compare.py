@@ -50,8 +50,8 @@ def good_factory(model, tools, scenario):
 
 
 @pytest.fixture
-def examples(tmp_path):
-    d = tmp_path / "examples"
+def scenarios_dir(tmp_path):
+    d = tmp_path / "scenarios_dir"
     d.mkdir()
     (d / "01_irrelevante.txt").write_text("usuario: bom dia\n", encoding="utf-8")
     (d / "02_fato_novo.txt").write_text("usuario: tomo café sem açúcar\n", encoding="utf-8")
@@ -63,10 +63,10 @@ def tmp_base(tmp_path, monkeypatch):
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
 
 
-def run_main(examples, tmp_path, models, factory, runs=2):
+def run_main(scenarios_dir, tmp_path, models, factory, runs=2):
     out = tmp_path / "cmp"
     code = compare.main(
-        ["--models", models, "--runs", str(runs), "--examples", str(examples), "--out", str(out)],
+        ["--models", models, "--runs", str(runs), "--scenarios", str(scenarios_dir), "--out", str(out)],
         factory=factory,
     )
     results = json.loads((tmp_path / "cmp-results.json").read_text(encoding="utf-8"))["results"]
@@ -101,8 +101,8 @@ def test_explicit_memory_dir_never_pushes(tmp_path, monkeypatch):
     assert forced.remote == "https://github.com/x/y.git"
 
 
-def test_end_to_end_runs_each_model_twice_with_isolated_memories(examples, tmp_path):
-    code, results, report = run_main(examples, tmp_path, "fake/a,fake/b", good_factory)
+def test_end_to_end_runs_each_model_twice_with_isolated_memories(scenarios_dir, tmp_path):
+    code, results, report = run_main(scenarios_dir, tmp_path, "fake/a,fake/b", good_factory)
     assert code == 0
     assert len(results) == 2 * 2 * 2  # modelos x rodadas x cenários
     assert all(not r["error"] and all(r["checks"].values()) for r in results)
@@ -114,7 +114,7 @@ def test_end_to_end_runs_each_model_twice_with_isolated_memories(examples, tmp_p
     assert len(list((tmp_path).glob("compare-*/fake_a-run*"))) == 2  # uma memória por rodada
 
 
-def test_failing_check_is_reported(examples, tmp_path):
+def test_failing_check_is_reported(scenarios_dir, tmp_path):
     def sloppy(model, tools, scenario):
         # no cenário 01 grava algo indevido
         if scenario.startswith("01"):
@@ -125,13 +125,13 @@ def test_failing_check_is_reported(examples, tmp_path):
             return build_curator(llm=ScriptedModel(responses=script), tools=tools)
         return good_factory(model, tools, scenario)
 
-    _, results, report = run_main(examples, tmp_path, "fake/a", sloppy, runs=1)
+    _, results, report = run_main(scenarios_dir, tmp_path, "fake/a", sloppy, runs=1)
     r01 = next(r for r in results if r["scenario"].startswith("01"))
     assert r01["checks"]["nao_gravou"] is False and r01["checks"]["sem_commit"] is True
     assert "- fake/a #1 01_irrelevante: nao_gravou" in report
 
 
-def test_tool_errors_are_counted(examples, tmp_path):
+def test_tool_errors_are_counted(scenarios_dir, tmp_path):
     def with_error(model, tools, scenario):
         if scenario.startswith("01"):
             script = [msg(calls=[("write_memory", {"path": "a.md", "content": "sem frontmatter"})]),
@@ -139,19 +139,19 @@ def test_tool_errors_are_counted(examples, tmp_path):
             return build_curator(llm=ScriptedModel(responses=script), tools=tools)
         return good_factory(model, tools, scenario)
 
-    _, results, _ = run_main(examples, tmp_path, "fake/a", with_error, runs=1)
+    _, results, _ = run_main(scenarios_dir, tmp_path, "fake/a", with_error, runs=1)
     r01 = next(r for r in results if r["scenario"].startswith("01"))
     assert r01["tool_calls"] == 1 and r01["tool_errors"] == 1
     assert r01["checks"]["sem_erro_de_tool"] is False
 
 
-def test_model_error_is_recorded_and_run_continues(examples, tmp_path):
+def test_model_error_is_recorded_and_run_continues(scenarios_dir, tmp_path):
     def flaky(model, tools, scenario):
         if model == "fake/bad":
             raise RuntimeError("400: temperature não suportado")
         return good_factory(model, tools, scenario)
 
-    code, results, report = run_main(examples, tmp_path, "fake/bad,fake/a", flaky, runs=1)
+    code, results, report = run_main(scenarios_dir, tmp_path, "fake/bad,fake/a", flaky, runs=1)
     assert code == 0
     bad = [r for r in results if r["model"] == "fake/bad"]
     assert len(bad) == 2 and all("temperature" in r["error"] and r["checks"] == {} for r in bad)
@@ -165,13 +165,13 @@ def test_scenario_04_and_05_checks():
     assert compare._has("Toma Café sem Açúcar", "cafe", "acucar")
 
 
-def test_requires_api_key_for_real_runs(examples, tmp_path, monkeypatch, capsys):
+def test_requires_api_key_for_real_runs(scenarios_dir, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", "")
-    code = compare.main(["--models", "x/y", "--examples", str(examples), "--out", str(tmp_path / "c")])
+    code = compare.main(["--models", "x/y", "--scenarios", str(scenarios_dir), "--out", str(tmp_path / "c")])
     assert code == 1 and "OPENROUTER_API_KEY" in capsys.readouterr().err
 
 
 def test_rejects_empty_inputs(tmp_path, capsys):
     empty = tmp_path / "vazio"
     empty.mkdir()
-    assert compare.main(["--examples", str(empty)], factory=good_factory) == 2
+    assert compare.main(["--scenarios", str(empty)], factory=good_factory) == 2

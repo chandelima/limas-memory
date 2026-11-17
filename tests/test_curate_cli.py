@@ -44,7 +44,7 @@ def test_parse_conversation_empty():
 def test_example_scenarios_are_parseable():
     from pathlib import Path
 
-    files = sorted(Path(__file__).parent.parent.joinpath("examples").glob("*.txt"))
+    files = sorted(Path(__file__).parent.parent.joinpath("evals", "scenarios").glob("*.txt"))
     assert len(files) == 5
     for f in files:
         assert cli.parse_conversation(f.read_text(encoding="utf-8")), f.name

@@ -1,8 +1,8 @@
-"""Compara modelos no Memory Curator: roda os cenários de examples/ várias vezes por
+"""Compara modelos no Memory Curator: roda os cenários de evals/scenarios/ várias vezes por
 modelo, mede tokens/tempo/chamadas e confere checagens objetivas sobre a memória gerada.
 
 Uso:
-    python src/compare.py --models openai/gpt-6-luna,anthropic/claude-haiku-5.5 --runs 2
+    python evals/compare.py --models openai/gpt-6-luna,anthropic/claude-haiku-5.5 --runs 2
 
 Cada (modelo, rodada) usa uma memória temporária NOVA e isolada, sem remote (nunca faz
 push). Os cenários rodam em ordem dentro da mesma memória, pois o 03 e o 04 dependem do
@@ -22,12 +22,17 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-import config
-from curate import parse_conversation
-from curator.agent import Usage, build_curator, curate
-from curator.tools import build_tools, make_store_and_git
-from storage import index as idx
-from storage.store import MemoryStore
+# Este script vive em evals/, fora de src/: garante que os módulos de src/ sejam importáveis.
+_SRC = str(Path(__file__).resolve().parent.parent / "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+import config  # noqa: E402
+from curate import parse_conversation  # noqa: E402
+from curator.agent import Usage, build_curator, curate  # noqa: E402
+from curator.tools import build_tools, make_store_and_git  # noqa: E402
+from storage import index as idx  # noqa: E402
+from storage.store import MemoryStore  # noqa: E402
 
 CONTEST_MARKERS = ("contest", "em revis", "contradit", "conflit", "nao confirm")
 
@@ -271,14 +276,14 @@ def main(argv: list[str] | None = None, factory=_default_factory) -> int:
     ap.add_argument("--models", default=config.OPENROUTER_MODEL,
                     help="slugs do OpenRouter separados por vírgula (padrão: OPENROUTER_MODEL)")
     ap.add_argument("--runs", type=int, default=2, help="rodadas por modelo (padrão: 2)")
-    ap.add_argument("--examples", type=Path, default=config.ROOT / "examples",
+    ap.add_argument("--scenarios", type=Path, default=config.ROOT / "evals" / "scenarios",
                     help="pasta com os cenários .txt")
     ap.add_argument("--channel", default="teste (CLI)")
     ap.add_argument("--out", default="compare", help="prefixo dos arquivos de saída")
     args = ap.parse_args(argv)
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
-    scenarios = sorted(args.examples.glob("*.txt"))
+    scenarios = sorted(args.scenarios.glob("*.txt"))
     if not models or not scenarios or args.runs < 1:
         print("Informe ao menos um modelo, um cenário e --runs >= 1.", file=sys.stderr)
         return 2
