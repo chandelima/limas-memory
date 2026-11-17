@@ -101,15 +101,18 @@ class TaskStore:
     # ---- mudanças ------------------------------------------------------------
 
     def add(self, text: str, due_date: date | None = None, due_time: time | None = None,
-            recurrence: Recurrence | None = None) -> Task:
-        text = model.clean_text(text)
+            recurrence: Recurrence | None = None, tags=()) -> Task:
+        text, inline = model.split_tags(model.clean_text(text))  # '#etiqueta' no fim do texto também vale
+        if not text:
+            raise TaskError("a tarefa precisa de um texto")
+        tags = tuple(dict.fromkeys((*inline, *model.parse_tags(tags))))
         if recurrence is not None and due_date is not None:
             raise TaskError("tarefa recorrente não tem data; informe só a recorrência (e a hora)")
         if due_time is not None and due_date is None and recurrence is None:
             raise TaskError("uma hora precisa de uma data")
         with self._lock:
             tl = self.load()
-            task = Task(self._new_id(tl), text, due_date, due_time, recurrence)
+            task = Task(self._new_id(tl), text, due_date, due_time, recurrence, tags)
             (tl.recurring if recurrence else tl.pending).append(task)
             self._save(tl)
             return task
@@ -120,14 +123,14 @@ class TaskStore:
             tl = self.load()
             if task := self._find(tl.pending, task_id):
                 tl.pending.remove(task)
-                done = Completion(task.id, task.text, task.due_date, task.due_time, on)
+                done = Completion(task.id, task.text, task.due_date, task.due_time, on, task.tags)
             elif task := self._find(tl.recurring, task_id):
                 if not task.recurrence.occurs_on(on):
                     raise TaskError(f"'{task.text}' não ocorre em {on.isoformat()} ({task.recurrence.render()})")
                 existing = next((c for c in tl.done if c.id == task.id and c.done_on == on), None)
                 if existing:
                     return existing  # já estava cumprida nesse dia
-                done = Completion(task.id, task.text, on, task.due_time, on)
+                done = Completion(task.id, task.text, on, task.due_time, on, task.tags)
             elif self._find(tl.done, task_id):
                 raise TaskError(f"a tarefa {task_id} já está concluída")
             else:
@@ -153,7 +156,7 @@ class TaskStore:
             if not match:
                 raise TaskError(f"não existe tarefa concluída com o ID {task_id}")
             tl.done.remove(match)
-            task = Task(match.id, match.text, match.due_date, match.due_time)
+            task = Task(match.id, match.text, match.due_date, match.due_time, tags=match.tags)
             tl.pending.append(task)
             self._save(tl)
             return task
@@ -170,6 +173,27 @@ class TaskStore:
             self._save(tl)
             return task
 
+    def retag(self, task_id: str, add=(), remove=()) -> Task:
+        """Acrescenta e/ou tira etiquetas de uma tarefa pendente ou recorrente."""
+        add_tags, remove_tags = model.parse_tags(add), set(model.parse_tags(remove))
+        with self._lock:
+            tl = self.load()
+            task = self._find(tl.pending, task_id) or self._find(tl.recurring, task_id)
+            if task is None:
+                raise TaskError(f"não existe tarefa pendente ou recorrente com o ID {task_id}")
+            task.tags = tuple(t for t in dict.fromkeys((*task.tags, *add_tags)) if t not in remove_tags)
+            self._save(tl)
+            return task
+
+    def tags(self) -> dict[str, int]:
+        """Etiquetas em uso (pendentes e recorrentes) e quantas tarefas tem cada uma."""
+        tl = self.load()
+        counts: dict[str, int] = {}
+        for task in (*tl.pending, *tl.recurring):
+            for tag in task.tags:
+                counts[tag] = counts.get(tag, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
     def remove(self, task_id: str) -> Task:
         with self._lock:
             tl = self.load()
@@ -182,10 +206,15 @@ class TaskStore:
 
     # ---- consultas -----------------------------------------------------------
 
-    def agenda(self, on: date | None = None, horizon_days: int = 3) -> Agenda:
-        """Atrasadas, de hoje (com recorrentes) e dos próximos `horizon_days` dias."""
+    def agenda(self, on: date | None = None, horizon_days: int = 3, tag: str = "") -> Agenda:
+        """Atrasadas, de hoje (com recorrentes) e dos próximos `horizon_days` dias.
+        Com `tag`, só as tarefas com essa etiqueta."""
         on = on or self.today()
         tl = self.load()
+        if tag:
+            wanted = model.normalize_tag(tag)
+            tl.pending = [t for t in tl.pending if wanted in t.tags]
+            tl.recurring = [t for t in tl.recurring if wanted in t.tags]
         agenda = Agenda(today=on)
         agenda.overdue = sorted((t for t in tl.pending if t.due_date and t.due_date < on),
                                 key=lambda t: (t.due_date, t.due_time or time.min))
@@ -194,7 +223,8 @@ class TaskStore:
             day = on + timedelta(days=offset)
             items = [AgendaItem(t, t.due_time) for t in tl.pending if t.due_date == day]
             for rec in tl.recurring:
-                if rec.recurrence.occurs_on(day):
+                # diárias só em "hoje": repetir em todo dia dos "próximos dias" seria ruído
+                if rec.recurrence.occurs_on(day) and (offset == 0 or rec.recurrence.kind != "daily"):
                     cumprida = any(c.id == rec.id and c.done_on == day for c in tl.done)
                     items.append(AgendaItem(rec, rec.due_time, recurring=True, done=cumprida))
             items.sort(key=_sort_key)

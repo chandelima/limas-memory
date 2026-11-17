@@ -89,6 +89,19 @@ CONTRADIÇÕES E HIPÓTESES:
   numa seção `## Hipóteses (não verificadas)`, com data
   e origem. Nunca os coloque na lista de fatos.
 
+TAREFAS E COMPROMISSOS:
+
+- A lista de tarefas (afazeres, compromissos e lembretes
+  com data ou hora, inclusive rotinas que se repetem) é
+  gerenciada pelo agente de resposta, na pasta `todos/`,
+  que é protegida: não crie, altere nem duplique tarefas
+  na memória, e não copie eventos de viagem (voos,
+  hospedagens) para lista nenhuma.
+- Se uma mensagem pedir para anotar uma tarefa, lembrete
+  ou compromisso, ela já foi tratada: ignore esse pedido.
+  Registre apenas o conhecimento duradouro que a conversa
+  trouxer (uma viagem, uma preferência, um fato).
+
 ANEXOS:
 
 - Uma mensagem pode ser um arquivo enviado pelo usuário

@@ -285,10 +285,10 @@ def test_agenda_groups_overdue_today_recurring_upcoming_and_undated(tasks):
     assert agenda.today == TODAY and [t.text for t in agenda.overdue] == ["atrasada"]
     assert [i.task.text for i in agenda.due_today] == ["remédio", "consulta", "hoje sem hora"]  # por hora; sem hora no fim
     assert [i.recurring for i in agenda.due_today] == [True, False, False]
-    # o remédio diário aparece em todos os dias do horizonte (19, 20 e 21)
-    assert list(agenda.upcoming) == [date(2026, 11, 19), date(2026, 11, 20), date(2026, 11, 21)]
-    assert [i.task.text for i in agenda.upcoming[date(2026, 11, 21)]] == ["remédio", "daqui a 3 dias"]
-    assert [i.task.text for i in agenda.upcoming[date(2026, 11, 19)]] == ["remédio", "amanhã"]
+    # a tarefa diária só aparece em "hoje"; nos próximos dias, só o que é específico do dia
+    assert list(agenda.upcoming) == [date(2026, 11, 19), date(2026, 11, 21)]
+    assert [i.task.text for i in agenda.upcoming[date(2026, 11, 21)]] == ["daqui a 3 dias"]
+    assert [i.task.text for i in agenda.upcoming[date(2026, 11, 19)]] == ["amanhã"]
     assert "longe demais" not in str(agenda.upcoming) and [t.text for t in agenda.undated] == ["sem data"]
     assert not agenda.is_empty()
 

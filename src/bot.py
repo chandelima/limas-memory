@@ -39,6 +39,8 @@ from chatflow import Conversation, build_service, describe_outcome
 from conversation.log import READING, ConversationLog
 from responder.agent import build_responder, default_read_tools
 from storage.store import MemoryStore
+from tasks.store import TaskStore
+from tasks.tools import build_task_tools
 from telegram_gateway import TELEGRAM_LIMIT, TYPING_INTERVAL, TelegramGateway, split_message, to_plain  # noqa: F401
 
 WATCH_INTERVAL = 30  # segundos entre verificações de inatividade
@@ -341,11 +343,14 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     if not config.TELEGRAM_BOT_TOKEN:
         print("Erro: defina TELEGRAM_BOT_TOKEN no ambiente ou no .env (token do @BotFather)", file=sys.stderr)
         return 1
-    registry = AttachmentRegistry(MemoryStore(args.memory_dir or config.MEMORY_DIR))
+    memory_store = MemoryStore(args.memory_dir or config.MEMORY_DIR)
+    registry = AttachmentRegistry(memory_store)
+    tasks = TaskStore(memory_store)  # lista de tarefas (todos/todo.md), gravada por código
     outbox: list = []  # arquivos que o agente pede para reenviar na resposta atual
     if agent is None:
         try:
-            tools = default_read_tools(args.memory_dir) + build_attachment_tools(registry, outbox)
+            tools = (default_read_tools(args.memory_dir) + build_attachment_tools(registry, outbox)
+                     + build_task_tools(tasks))
             agent = build_responder(tools=tools)
         except RuntimeError as exc:
             print(f"Erro: {exc}", file=sys.stderr)

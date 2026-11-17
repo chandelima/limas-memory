@@ -128,6 +128,7 @@ class Task:
     due_date: date | None = None
     due_time: time | None = None
     recurrence: Recurrence | None = None
+    tags: tuple[str, ...] = ()
 
 
 @dataclass
@@ -137,6 +138,7 @@ class Completion:
     due_date: date | None
     due_time: time | None
     done_on: date
+    tags: tuple[str, ...] = ()
 
 
 @dataclass
@@ -148,6 +150,37 @@ class TaskList:
 
     def ids(self) -> set[str]:
         return {t.id for t in (*self.pending, *self.recurring)} | {c.id for c in self.done}
+
+
+# ---- etiquetas (#saúde) ----------------------------------------------------------------
+
+_TAG = re.compile(r"[^\W\d_][\w-]*")  # começa com letra: "#1" não é etiqueta
+_TRAILING_TAGS = re.compile(r"(?:^|\s+)#[^\W\d_][\w-]*(?:\s+#[^\W\d_][\w-]*)*\s*$")
+
+
+def normalize_tag(tag: str) -> str:
+    value = tag.strip().lstrip("#").lower().replace(" ", "-")
+    if not _TAG.fullmatch(value):
+        raise TaskError(f"etiqueta inválida: '{tag}' (letras, números e hífen; começa com letra)")
+    return value
+
+
+def parse_tags(value) -> tuple[str, ...]:
+    """'saúde, casa' / '#saúde #casa' / ['saúde'] -> ('saúde', 'casa'); sem repetidas."""
+    items = re.split(r"[,\s]+", value) if isinstance(value, str) else list(value)
+    return tuple(dict.fromkeys(normalize_tag(i) for i in items if str(i).strip()))
+
+
+def split_tags(text: str) -> tuple[str, tuple[str, ...]]:
+    """Separa as etiquetas escritas no FIM do texto: 'Consulta #saúde' -> ('Consulta', ('saúde',))."""
+    match = _TRAILING_TAGS.search(text)
+    if not match:
+        return text, ()
+    return text[: match.start()].rstrip(), parse_tags(match.group(0))
+
+
+def with_tags(text: str, tags: tuple[str, ...]) -> str:
+    return text + "".join(f" #{t}" for t in tags)
 
 
 def clean_text(text: str) -> str:
@@ -189,14 +222,17 @@ def parse(text: str) -> TaskList:
         try:
             if section == SECTION_PENDING and item.group(1) == " " and (m := _PENDING.match(content)):
                 due, tm = _parse_when(m.group(1), m.group(2))
-                tl.pending.append(Task(task_id, m.group(3), due, tm))
+                text, tags = split_tags(m.group(3))
+                tl.pending.append(Task(task_id, text, due, tm, tags=tags))
             elif section == SECTION_RECURRING and item.group(1) == " " and (m := _RECURRING.match(content)):
                 rec = Recurrence.parse(m.group(1))
-                tl.recurring.append(Task(task_id, m.group(3), due_time=parse_time(m.group(2)) if m.group(2) else None,
-                                         recurrence=rec))
+                text, tags = split_tags(m.group(3))
+                tl.recurring.append(Task(task_id, text, due_time=parse_time(m.group(2)) if m.group(2) else None,
+                                         recurrence=rec, tags=tags))
             elif section == SECTION_DONE and item.group(1) == "x" and (m := _DONE.match(content)):
                 due, tm = _parse_when(m.group(1), m.group(2))
-                tl.done.append(Completion(task_id, m.group(3), due, tm, date.fromisoformat(m.group(4))))
+                text, tags = split_tags(m.group(3))
+                tl.done.append(Completion(task_id, text, due, tm, date.fromisoformat(m.group(4)), tags))
             else:
                 raise ValueError
         except (ValueError, TaskError):
@@ -218,13 +254,13 @@ def render(tl: TaskList) -> str:
 
     def pending_line(t: Task) -> str:
         when = _when(t.due_date, t.due_time)
-        return f"- [ ] {when + SEP if when else ''}{t.text} ^{t.id}"
+        return f"- [ ] {when + SEP if when else ''}{with_tags(t.text, t.tags)} ^{t.id}"
 
     def recurring_line(t: Task) -> str:
-        return f"- [ ] {' '.join(p for p in (t.recurrence.render(), fmt_time(t.due_time)) if p)}{SEP}{t.text} ^{t.id}"
+        return f"- [ ] {' '.join(p for p in (t.recurrence.render(), fmt_time(t.due_time)) if p)}{SEP}{with_tags(t.text, t.tags)} ^{t.id}"
 
     def done_line(c: Completion) -> str:
-        return f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{c.text} (feita em {c.done_on.isoformat()}) ^{c.id}"
+        return f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{with_tags(c.text, c.tags)} (feita em {c.done_on.isoformat()}) ^{c.id}"
 
     sections = (
         (SECTION_PENDING, [pending_line(t) for t in pending]),
@@ -247,7 +283,7 @@ def render_archive(done: list[Completion], month: str) -> str:
     """Arquivo mensal de concluídas (todos/arquivo/AAAA-MM.md), só com a seção Concluídas."""
     front = yaml.safe_dump({"description": f"Arquivo de tarefas concluídas em {month}."},
                            allow_unicode=True, sort_keys=False).strip()
-    lines = [f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{c.text} (feita em {c.done_on.isoformat()}) ^{c.id}"
+    lines = [f"- [x] {_when(c.due_date, c.due_time) or 'sem data'}{SEP}{with_tags(c.text, c.tags)} (feita em {c.done_on.isoformat()}) ^{c.id}"
              for c in sorted(done, key=lambda c: c.done_on, reverse=True)]
     return "\n".join([f"---\n{front}\n---", f"# Tarefas concluídas em {month}", "",
                       f"## {SECTION_DONE}", "", *lines, ""])
