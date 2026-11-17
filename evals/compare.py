@@ -34,7 +34,7 @@ from curator.tools import build_tools, make_store_and_git  # noqa: E402
 from storage import index as idx  # noqa: E402
 from storage.store import MemoryStore  # noqa: E402
 
-CONTEST_MARKERS = ("contest", "em revis", "contradit", "conflit", "nao confirm")
+CONTEST_MARKERS = ("contest", "em revis", "contradit", "contradic", "conflit", "nao confirm", "em aberto", "nao resolvid")
 
 
 def norm(text: str) -> str:

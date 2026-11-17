@@ -175,3 +175,11 @@ def test_rejects_empty_inputs(tmp_path, capsys):
     empty = tmp_path / "vazio"
     empty.mkdir()
     assert compare.main(["--scenarios", str(empty)], factory=good_factory) == 2
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["## Contradição em aberto", "Status: não resolvido", "informação contestada", "Em revisão", "contraditória"],
+)
+def test_contest_markers_cover_common_wordings(text):
+    assert any(m in compare.norm(text) for m in compare.CONTEST_MARKERS)
