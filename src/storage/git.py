@@ -13,6 +13,7 @@ from pathlib import Path
 PUSH_TIMEOUT = 60  # segundos
 _FALLBACK_NAME = "Memory Curator"
 _FALLBACK_EMAIL = "memory-curator@localhost"
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 class GitError(RuntimeError):
@@ -146,3 +147,13 @@ class MemoryGit:
         """Últimos commits ('sha assunto'), mais recentes primeiro."""
         proc = self._git("log", f"-{limit}", "--format=%h %s")
         return proc.stdout.strip().splitlines() if proc.returncode == 0 else []
+
+    def head(self) -> str | None:
+        """Sha curto do último commit, ou None se ainda não há commits."""
+        proc = self._git("rev-parse", "--short", "HEAD")
+        return proc.stdout.strip() if proc.returncode == 0 else None
+
+    def diff(self, since: str | None) -> str:
+        """Mudanças (resumo + patch) de `since` até HEAD; None = desde o início."""
+        proc = self._git("diff", "--stat", "-p", since or _EMPTY_TREE, "HEAD")
+        return proc.stdout.strip() if proc.returncode == 0 else ""

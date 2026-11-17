@@ -1,0 +1,5 @@
+usuario: Bom dia! Tudo bem?
+assistente: Bom dia! Tudo bem por aqui, e com você?
+usuario: Tudo certo. Hoje tá bem nublado, né?
+assistente: Sim, parece que vai chover mais tarde.
+usuario: Valeu, era só isso. Até mais!

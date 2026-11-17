@@ -55,3 +55,8 @@ def test_is_external():
     assert md.is_external("https://x.com") and md.is_external("mailto:a@b.c")
     assert md.is_external("//cdn.x/y")
     assert not md.is_external("../a.md") and not md.is_external("a.md#x")
+
+
+def test_invalid_frontmatter_error_hints_at_quotes():
+    with pytest.raises(md.MarkdownError, match="aspas"):
+        md.parse_frontmatter("---\ndescription: Usuário - nota: algo\n---\ncorpo")

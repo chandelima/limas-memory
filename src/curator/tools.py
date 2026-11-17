@@ -5,6 +5,8 @@ validação viram uma mensagem "ERRO: ..." que o agente lê e corrige; as regras
 verdade (caminho, description, segredos) continuam vivendo em `storage/`.
 """
 
+from pathlib import Path
+
 from langchain_core.tools import BaseTool, tool
 
 import config
@@ -115,14 +117,19 @@ def build_tools(store: MemoryStore, git: MemoryGit) -> list[BaseTool]:
     return [list_memory, search_memory, read_memory, write_memory, update_index, commit_memory]
 
 
-def default_tools() -> list[BaseTool]:
-    """Tools ligadas à memória e ao git configurados por env."""
-    store = MemoryStore(config.MEMORY_DIR)
+def make_store_and_git(memory_dir: Path | None = None) -> tuple[MemoryStore, MemoryGit]:
+    """Store e git da pasta indicada (padrão: MEMORY_DIR), com credenciais por env."""
+    root = Path(memory_dir) if memory_dir else config.MEMORY_DIR
     git = MemoryGit(
-        config.MEMORY_DIR,
+        root,
         remote=config.MEMORY_GIT_REMOTE,
         user_name=config.MEMORY_GIT_USER_NAME,
         user_email=config.MEMORY_GIT_USER_EMAIL,
         token=config.MEMORY_GIT_TOKEN,
     )
-    return build_tools(store, git)
+    return MemoryStore(root), git
+
+
+def default_tools(memory_dir: Path | None = None) -> list[BaseTool]:
+    """Tools ligadas à memória e ao git configurados por env."""
+    return build_tools(*make_store_and_git(memory_dir))

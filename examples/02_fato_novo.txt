@@ -1,0 +1,3 @@
+usuario: Sempre que for me sugerir bebida, lembra que eu tomo café sem açúcar.
+assistente: Anotado, vou considerar isso.
+usuario: Ah, e meu projeto principal agora é o limas-memory, um sistema de memória em Markdown com LangChain. Quero que os documentos fiquem versionados no GitHub.

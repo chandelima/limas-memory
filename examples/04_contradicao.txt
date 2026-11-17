@@ -1,0 +1,3 @@
+usuario: Na real, eu nem gosto de café. Nunca tomo, prefiro chá.
+assistente: Entendi. Antes você tinha mencionado que tomava café sem açúcar.
+usuario: Não sei, acho que falei isso por falar. Não tenho certeza.

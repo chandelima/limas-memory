@@ -27,7 +27,10 @@ def parse_frontmatter(content: str) -> tuple[dict, str]:
     try:
         meta = yaml.safe_load(match.group(1)) or {}
     except yaml.YAMLError as exc:
-        raise MarkdownError(f"Frontmatter inválido: {exc}") from exc
+        raise MarkdownError(
+            "Frontmatter inválido (se a description tiver ':' ou '#', "
+            f"coloque-a entre aspas duplas): {exc}"
+        ) from exc
     if not isinstance(meta, dict):
         raise MarkdownError("Frontmatter deve ser um mapa chave: valor")
     return meta, content[match.end():]

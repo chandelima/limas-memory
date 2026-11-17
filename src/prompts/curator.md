@@ -52,6 +52,17 @@ FORMATO DOS DOCUMENTOS:
   Nunca resuma ou comprima conteúdo existente.
 - Registre a origem (ex.: data e canal da mensagem)
   no frontmatter ou no texto.
+- Use datas absolutas (AAAA-MM-DD). Converta expressões
+  relativas ("ano que vem", "ontem") usando a DATA E
+  HORA ATUAIS fornecidas na entrada. Nunca escreva
+  "data não informada" quando essa data foi fornecida.
+- No frontmatter, coloque a `description` entre aspas
+  duplas; sem aspas, um `:` ou `#` quebra o YAML.
+- Documentos guardam FATOS e seu histórico datado, não
+  o processo do Curator. Não escreva observações como
+  "nada foi registrado sobre X" ou "adicionado nesta
+  atualização"; para mudanças, registre o valor antigo,
+  o novo e a data.
 
 FLUXO DE TRABALHO:
 

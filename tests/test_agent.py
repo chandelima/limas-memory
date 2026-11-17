@@ -95,3 +95,18 @@ def test_tool_error_is_visible_to_agent_which_can_retry(mem):
     result = curate([ChatMessage("usuario", "x")], agent=agent)
     assert result.tool_calls == ["write_memory", "write_memory"]
     assert (root / "a.md").exists()
+
+
+def test_format_input_includes_current_datetime():
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 11, 17, 9, 30, tzinfo=timezone.utc)
+    text = format_input([ChatMessage("usuario", "oi")], now=now)
+    assert text.startswith("DATA E HORA ATUAIS: 2026-11-17T09:30+00:00")
+
+
+def test_prompt_guides_dates_quotes_and_no_process_notes():
+    prompt = load_system_prompt()
+    assert "datas absolutas" in prompt and "DATA E" in prompt
+    assert "entre aspas" in prompt
+    assert "processo do Curator" in prompt

@@ -4,6 +4,7 @@ Não conversa com o usuário: a saída é um relatório curto do que fez.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
@@ -43,8 +44,11 @@ def build_curator(llm: BaseChatModel | None = None, tools: list | None = None):
     )
 
 
-def format_input(messages: list[ChatMessage], context: str = "") -> str:
-    lines = []
+def format_input(
+    messages: list[ChatMessage], context: str = "", now: datetime | None = None
+) -> str:
+    now = now or datetime.now().astimezone()
+    lines = [f"DATA E HORA ATUAIS: {now.isoformat(timespec='minutes')}", ""]
     if context.strip():
         lines += ["CONTEXTO DA CONVERSA:", context.strip(), ""]
     lines.append("MENSAGENS RECENTES:")
@@ -55,12 +59,14 @@ def format_input(messages: list[ChatMessage], context: str = "") -> str:
     return "\n".join(lines)
 
 
-def curate(messages: list[ChatMessage], context: str = "", agent=None) -> CurateResult:
+def curate(
+    messages: list[ChatMessage], context: str = "", agent=None, now: datetime | None = None
+) -> CurateResult:
     if not messages:
         raise ValueError("Nenhuma mensagem para curar")
     agent = agent or build_curator()
     state = agent.invoke(
-        {"messages": [HumanMessage(format_input(messages, context))]},
+        {"messages": [HumanMessage(format_input(messages, context, now))]},
         config={"recursion_limit": RECURSION_LIMIT},
     )
     out = state["messages"]
