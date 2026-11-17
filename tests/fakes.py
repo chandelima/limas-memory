@@ -19,23 +19,31 @@ class FakeGateway:
         self.registered = None
         self.panels, self.edits, self.answers = [], [], []
         self.progress_edits = []
+        self.last_edit = None
+        self.last_answer_html = ""
 
     async def send_text(self, chat_id, text, *, raw=False):
         self.texts.append((chat_id, text))
         self.events.append(("text", text))
 
-    async def send_placeholder(self, chat_id, text):
+    async def send_placeholder(self, chat_id, text, *, html=False):
         self.events.append(("placeholder", text))
         self.progress_edits = [text]
         return 700
 
-    async def edit_text(self, chat_id, message_id, text):
+    async def edit_text(self, chat_id, message_id, text, *, html=False):
         self.events.append(("progress", text))
         self.progress_edits.append(text)
+        self.last_edit = (message_id, text, html)
 
     async def replace_text(self, chat_id, message_id, text, *, raw=False):
         self.texts.append((chat_id, text))  # the final text, as if sent normally
         self.events.append(("text", text))
+
+    async def write_answer(self, chat_id, message_id, html_text, plain_text):
+        self.texts.append((chat_id, plain_text))  # what the user reads as the answer
+        self.events.append(("text", plain_text))
+        self.last_answer_html = html_text
 
     async def send_buttons(self, chat_id, text, rows):
         self.panels.append((chat_id, text, rows))

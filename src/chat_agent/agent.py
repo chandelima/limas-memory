@@ -61,34 +61,44 @@ def _to_messages(history: list[ChatMessage], now: datetime, language: str = ""):
     return out
 
 
-def _report(on_step, name: str, args: dict) -> None:
+def _report(callback, *args) -> None:
     """Progress is a nicety: a failing callback never breaks the reply."""
     try:
-        on_step(name, args)
+        callback(*args)
     except Exception:  # noqa: BLE001
         pass
 
 
 def reply(history: list[ChatMessage], agent=None, now: datetime | None = None, language: str = "",
-          on_step=None) -> ReplyResult:
+          on_step=None, on_text=None) -> ReplyResult:
     """Answer the user's last message (which must be the last one in the history).
 
-    `on_step(tool_name, args)`, if given, is called as soon as the agent asks for a tool (while it is
-    still working), so the caller can show progress. It runs in the calling thread."""
+    While the agent works, `on_step(tool_name, args)` is called as soon as it asks for a tool and
+    `on_text(piece)` with each piece of text the model writes (token by token when the provider
+    streams), so the caller can show progress. Both run in the calling thread."""
     if not history or history[-1].role != "user":
         raise ValueError("The history must end with a user message")
     agent = agent or build_chat_agent()
     now = now or datetime.now().astimezone()
     request = {"messages": _to_messages(history, now, language)}
     config_ = {"recursion_limit": RECURSION_LIMIT}
-    if on_step is None or not hasattr(agent, "stream"):
+    if (on_step is None and on_text is None) or not hasattr(agent, "stream"):
         state = agent.invoke(request, config=config_)
     else:
+        modes = ["values"] + (["messages"] if on_text else [])  # "messages": the model's tokens
         state, seen = None, 0
-        for state in agent.stream(request, config=config_, stream_mode="values"):  # the whole state after each step
+        for mode, data in agent.stream(request, config=config_, stream_mode=modes):
+            if mode == "messages":
+                chunk, metadata = data
+                if isinstance(chunk, AIMessage) and metadata.get("langgraph_node") == "model":
+                    piece = chunk.text
+                    if piece:
+                        _report(on_text, piece)
+                continue
+            state = data  # "values": the whole state after each step
             messages = state["messages"]
             for message in messages[seen:]:
-                if isinstance(message, AIMessage):
+                if isinstance(message, AIMessage) and on_step:
                     for call in message.tool_calls:
                         _report(on_step, call["name"], call["args"])
             seen = len(messages)

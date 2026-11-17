@@ -300,7 +300,8 @@ class BotHandlers:
         progress = Progress(gateway, chat_id)
         await progress.start()
         try:
-            result = await asyncio.to_thread(self.conversation.respond_to, msg_id, progress.push)
+            result = await asyncio.to_thread(self.conversation.respond_to, msg_id,
+                                            progress.push, progress.push_text)
         except Exception as exc:  # noqa: BLE001 - never exposes internal details in the chat
             log.exception("error replying to message %s", msg_id)
             self.conversation.fail(msg_id)

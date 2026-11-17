@@ -13,5 +13,5 @@ def get_llm(model: str | None = None, **kwargs) -> ChatOpenAI:
         model=model or config.OPENROUTER_MODEL,
         api_key=config.OPENROUTER_API_KEY,
         base_url=config.OPENROUTER_BASE_URL,
-        **kwargs,
+        **{"stream_usage": True, **kwargs},  # token usage also when the answer is streamed
     )

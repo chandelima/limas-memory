@@ -143,13 +143,14 @@ class Conversation:
 
     # ---- 2. reply ----------------------------------------------------------------
 
-    def respond_to(self, msg_id: int, on_step=None) -> ReplyResult:
+    def respond_to(self, msg_id: int, on_step=None, on_text=None) -> ReplyResult:
         """Answer message `msg_id` (already recorded), reading the memory, and record the reply.
-        `on_step(tool_name, args)` is called while the agent works (see chat_agent.reply)."""
+        `on_step(tool_name, args)` and `on_text(piece)` are called while the agent works (see chat_agent.reply)."""
         history = compact_history(self.log.history(msg_id, HISTORY_MESSAGES))
         self.outbox.clear()
         started = time.monotonic()
-        result = reply([to_chat(m) for m in history], agent=self.agent, language=user_language(), on_step=on_step)
+        result = reply([to_chat(m) for m in history], agent=self.agent, language=user_language(),
+                       on_step=on_step, on_text=on_text)
         usage = result.usage
         cost = f"US$ {usage.cost:.4f}" if usage.cost_reported else "n/a"
         log.info("reply to message %s: %d tool call(s), %d file(s), %d tokens, cost %s, %.1fs",

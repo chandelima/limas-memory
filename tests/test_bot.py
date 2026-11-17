@@ -40,7 +40,7 @@ def env(tmp_path, monkeypatch):
                             hook=None, active=0, max_active=0,
                             read=lambda data, filename, mime: "Hotel Sol, check-in 12/03")
 
-    def fake_reply(history, agent=None, now=None, language="", on_step=None):
+    def fake_reply(history, agent=None, now=None, language="", on_step=None, on_text=None):
         gw.events.append(("agent", history[-1].text[:30]))
         state.calls.append([(m.role, m.text) for m in history])
         state.active += 1
@@ -782,11 +782,12 @@ def test_the_progress_message_shows_the_agent_steps_and_becomes_the_answer(env, 
     import progress
 
     monkeypatch.setattr(progress, "EDIT_INTERVAL", 0.01)
+    monkeypatch.setattr(progress, "THINKING_CPS", 0)  # no fake typing here: lines appear at once
     env.state.trace = [ToolEvent("list_memory", {}, "..."), ToolEvent("read_memory", {"path": "trips/x.md"}, "...")]
     env.state.replies = iter(["Here is the answer."])
     env.state.delay = 0.1  # leave time for the edits
     run(env.handlers.on_message(make_update(text="tell me about the trip"), env.ctx))
-    assert env.gw.progress_edits[0] == "💭 Thinking…"
+    assert env.gw.progress_edits[0] == "<i>💭 Thinking…</i>"  # italics: thinking is told apart from the answer
     assert any("Reading trips/x.md" in text for text in env.gw.progress_edits)
     kinds = [k for k, _ in env.gw.events]
     assert kinds.index("placeholder") < kinds.index("agent") < kinds.index("text")

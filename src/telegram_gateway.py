@@ -11,7 +11,7 @@ import re
 from contextlib import asynccontextmanager, suppress
 
 from telegram import BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
-from telegram.constants import ChatAction
+from telegram.constants import ChatAction, ParseMode
 
 from applog import get_logger
 from i18n import t
@@ -59,13 +59,25 @@ class TelegramGateway:
         for chunk in split_message(text if raw else to_plain(text)) or [t("no_reply")]:
             await self.bot.send_message(chat_id=chat_id, text=chunk)
 
-    async def send_placeholder(self, chat_id: int, text: str) -> int:
-        """A message that will be edited later (see progress.py). Return its message_id."""
-        message = await self.bot.send_message(chat_id=chat_id, text=text)
+    async def send_placeholder(self, chat_id: int, text: str, *, html: bool = False) -> int:
+        """A message that will be edited later (see progress.py). Return its message_id.
+        `html=True`: the text is Telegram HTML (e.g. <i>italics</i>); the caller escapes it."""
+        message = await self.bot.send_message(chat_id=chat_id, text=text, **({"parse_mode": ParseMode.HTML} if html else {}))
         return message.message_id
 
-    async def edit_text(self, chat_id: int, message_id: int, text: str) -> None:
-        await self.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
+    async def edit_text(self, chat_id: int, message_id: int, text: str, *, html: bool = False) -> None:
+        extra = {"parse_mode": ParseMode.HTML} if html else {}
+        await self.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, **extra)
+
+    async def write_answer(self, chat_id: int, message_id: int, html_text: str, plain_text: str) -> None:
+        """Write the final answer into the progress message: `html_text` has the thinking in italics on
+        top; if Telegram refuses it, `plain_text` replaces the message (or goes as a new one)."""
+        try:
+            await self.edit_text(chat_id, message_id, html_text, html=True)
+        except Exception as exc:  # noqa: BLE001
+            if "not modified" not in str(exc).lower():
+                log.warning("could not write the answer with formatting; falling back to plain text", exc_info=exc)
+                await self.replace_text(chat_id, message_id, plain_text, raw=True)
 
     async def replace_text(self, chat_id: int, message_id: int, text: str, *, raw: bool = False) -> None:
         """Turn an existing message into `text` (plain, split at the Telegram limit): the first chunk
