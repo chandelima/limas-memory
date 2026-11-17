@@ -8,7 +8,7 @@ Uso:
     python src/chat.py --memory-dir D:/tmp/memoria-teste --verbose
     python src/chat.py --memory-dir D:/tmp/m --log D:/tmp/conversa.json --idle-seconds 30
 
-Comandos: /curar (cura as pendentes agora), /status, sair.
+Comandos: /curate (cura as pendentes agora), /status, sair.
 """
 
 import argparse
@@ -61,7 +61,7 @@ def main(argv=None, agent=None, read=input, service=None, start_watcher=True) ->
 
     print(f"Chat com {config.OPENROUTER_MODEL} (memória: {memory_dir}). Digite 'sair' para encerrar.")
     print(f"Histórico: {log.path} | Curador após {service.idle_seconds:.0f}s de inatividade. "
-          f"Comandos: /curar, /status\n")
+          f"Comandos: /curate, /status\n")
     try:
         while True:
             try:
@@ -75,7 +75,7 @@ def main(argv=None, agent=None, read=input, service=None, start_watcher=True) ->
             if text == "/status":
                 print(conversation.status() + "\n")
                 continue
-            if text == "/curar":
+            if text == "/curate":
                 print(conversation.curate_now() + "\n")
                 continue
 
@@ -90,7 +90,7 @@ def main(argv=None, agent=None, read=input, service=None, start_watcher=True) ->
     pending = len(log.pending())
     if pending:
         print(f"{pending} mensagem(ns) ainda não curada(s); ficam salvas em {log.path} "
-              f"e serão curadas após {service.idle_seconds:.0f}s de inatividade ou com /curar.")
+              f"e serão curadas após {service.idle_seconds:.0f}s de inatividade ou com /curate.")
     return 0
 
 

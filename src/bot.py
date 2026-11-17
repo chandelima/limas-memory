@@ -8,7 +8,7 @@ Só o usuário em TELEGRAM_ALLOWED_USER_ID é atendido (e só em conversa privad
 env, o bot recusa todo mundo e imprime o ID de quem escreveu, para você configurá-la.
 Cada mensagem vai para o histórico; o agente de resposta lê a memória (somente leitura);
 depois de CURATOR_IDLE_SECONDS sem mensagens, o Curator processa o que ficou pendente.
-Comandos: /status e /curar (não vão para o modelo).
+Comandos: /status e /curate (não vão para o modelo).
 """
 
 import argparse
@@ -31,7 +31,7 @@ WATCH_INTERVAL = 30  # segundos entre verificações de inatividade
 TYPING_INTERVAL = 4  # o indicador "digitando..." dura ~5s
 SHUTDOWN_WAIT = 30  # espera máxima por uma curadoria em andamento ao encerrar
 
-HELP = "Pode conversar comigo normalmente.\n/status mostra o estado da memória.\n/curar processa agora o que ficou pendente."
+HELP = "Pode conversar comigo normalmente.\n/status mostra o estado da memória.\n/curate processa agora o que ficou pendente."
 
 
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
@@ -103,7 +103,7 @@ class BotHandlers:
         if self._authorized(update):
             await self._reply(update, self.conversation.status())
 
-    async def on_curar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def on_curate(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
         await update.effective_chat.send_action(ChatAction.TYPING)
@@ -144,7 +144,7 @@ def build_application(token: str, handlers: BotHandlers, service) -> Application
     app.bot_data["service"] = service
     app.add_handler(CommandHandler("start", handlers.on_start))
     app.add_handler(CommandHandler("status", handlers.on_status))
-    app.add_handler(CommandHandler("curar", handlers.on_curar))
+    app.add_handler(CommandHandler("curate", handlers.on_curate))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.on_message))
     app.add_handler(MessageHandler(filters.COMMAND, handlers.on_unknown))  # sempre por último
     app.add_error_handler(on_error)

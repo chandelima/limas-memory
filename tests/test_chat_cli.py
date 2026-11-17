@@ -58,11 +58,11 @@ def test_blank_input_and_commands_are_not_logged(tmp_path, monkeypatch):
     assert [m.text for m in log.messages()] == ["oi", "ok"] and len(seen) == 1
 
 
-def test_curar_command_runs_curator_on_pending_messages(tmp_path, monkeypatch, capsys):
+def test_curate_command_runs_curator_on_pending_messages(tmp_path, monkeypatch, capsys):
     curator = FakeCurator()
     log = ConversationLog(tmp_path / "conversa.json")
     service = CurationService(log, curator, channel="terminal", idle_seconds=600)
-    log_after, _ = run_chat(tmp_path, ["tomo café", "/curar", "sair"], monkeypatch,
+    log_after, _ = run_chat(tmp_path, ["tomo café", "/curate", "sair"], monkeypatch,
                             replies=["Anotado"], service=service)
     out = capsys.readouterr().out
     assert "[curador] 2 mensagem(ns) processada(s) (commit_memory)" in out and "Gravei 1 documento." in out
@@ -71,8 +71,8 @@ def test_curar_command_runs_curator_on_pending_messages(tmp_path, monkeypatch, c
     assert "ainda não curada" not in out
 
 
-def test_curar_with_nothing_pending(tmp_path, monkeypatch, capsys):
-    run_chat(tmp_path, ["/curar", "sair"], monkeypatch)
+def test_curate_with_nothing_pending(tmp_path, monkeypatch, capsys):
+    run_chat(tmp_path, ["/curate", "sair"], monkeypatch)
     assert "[curador] nada pendente." in capsys.readouterr().out
 
 
@@ -85,7 +85,7 @@ def test_status_command(tmp_path, monkeypatch, capsys):
 def test_failed_curation_is_reported_and_messages_stay_pending(tmp_path, monkeypatch, capsys):
     log = ConversationLog(tmp_path / "conversa.json")
     service = CurationService(log, FakeCurator(fail=True), channel="terminal")
-    log_after, _ = run_chat(tmp_path, ["oi", "/curar", "sair"], monkeypatch, service=service)
+    log_after, _ = run_chat(tmp_path, ["oi", "/curate", "sair"], monkeypatch, service=service)
     out = capsys.readouterr().out
     assert "[curador] falhou" in out and "sem rede" in out
     assert len(log_after.pending()) == 2

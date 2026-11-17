@@ -104,7 +104,7 @@ def test_other_users_and_groups_are_ignored():
     run(handlers.on_message(stranger, None))
     run(handlers.on_message(group, None))
     run(handlers.on_status(stranger, None))
-    run(handlers.on_curar(stranger, None))
+    run(handlers.on_curate(stranger, None))
     run(handlers.on_start(stranger, None))
     run(handlers.on_unknown(stranger, None))
     assert conv.received == []
@@ -130,16 +130,16 @@ def test_errors_reply_generically_without_leaking_details(capsys):
 def test_commands_do_not_reach_the_responder():
     conv = FakeConversation()
     handlers = bot.BotHandlers(conv, ALLOWED)
-    for method in (handlers.on_status, handlers.on_curar, handlers.on_start, handlers.on_unknown):
+    for method in (handlers.on_status, handlers.on_curate, handlers.on_start, handlers.on_unknown):
         run(method(make_update(text="/algo"), None))
     assert conv.received == []
 
 
-def test_status_curar_start_and_unknown_texts():
+def test_status_curate_start_and_unknown_texts():
     handlers = bot.BotHandlers(FakeConversation(), ALLOWED)
     for method, expected in (
         (handlers.on_status, "[status] pendentes: 2"),
-        (handlers.on_curar, "[curador] 2 mensagem(ns) processada(s)"),
+        (handlers.on_curate, "[curador] 2 mensagem(ns) processada(s)"),
     ):
         update = make_update()
         run(method(update, None))
@@ -147,7 +147,7 @@ def test_status_curar_start_and_unknown_texts():
     start, unknown = make_update(), make_update()
     run(handlers.on_start(start, None))
     run(handlers.on_unknown(unknown, None))
-    assert replies(start)[0].startswith("Olá!") and "/curar" in replies(start)[0]
+    assert replies(start)[0].startswith("Olá!") and "/curate" in replies(start)[0]
     assert replies(unknown)[0].startswith("Comando desconhecido")
 
 
