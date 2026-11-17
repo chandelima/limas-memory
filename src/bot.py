@@ -30,7 +30,8 @@ from pathlib import Path
 
 from telegram import BotCommand, Update
 from telegram.constants import ChatType
-from telegram.ext import Application, ChatMemberHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (Application, CallbackQueryHandler, ChatMemberHandler, CommandHandler, ContextTypes,
+                          MessageHandler, filters)
 
 import config
 from applog import LogShipper, configure_logging, get_logger, parse_channel_id
@@ -42,6 +43,8 @@ from chatflow import Conversation, build_service, describe_outcome
 from conversation.log import READING, ConversationLog
 from responder.agent import build_responder, default_read_tools
 from storage.store import MemoryStore
+from tasks import panel
+from tasks.model import TaskError
 from tasks.store import TaskStore
 from tasks.tools import build_task_tools
 from telegram_gateway import TELEGRAM_LIMIT, TYPING_INTERVAL, TelegramGateway, split_message, to_plain  # noqa: F401
@@ -52,13 +55,14 @@ WATCH_INTERVAL = 30  # segundos entre verificações de inatividade
 SHUTDOWN_WAIT = 30  # espera máxima por uma curadoria em andamento ao encerrar
 RECOVERY_MAX_AGE = timedelta(hours=24)  # mensagens sem resposta mais antigas que isso são descartadas
 
-HELP = "Pode conversar comigo normalmente.\n/status mostra o estado da memória.\n/curate processa agora o que ficou pendente."
+HELP = "Pode conversar comigo normalmente.\n/status mostra o estado da memória.\n/curate processa agora o que ficou pendente.\n/todo mostra as tarefas com botões."
 FILE_NOTICE = "Recebi o arquivo, lendo..."
 RECOVERY_NOTICE = "Voltei depois de uma reinicialização e vou responder as mensagens que ficaram pendentes."
 ERROR_REPLY = "Tive um problema para responder agora. Tente de novo em instantes."
 
 COMMANDS = [
     BotCommand("status", "Mostra o estado da memória e das mensagens pendentes"),
+    BotCommand("todo", "Lista as tarefas com botões para marcar e desmarcar"),
     BotCommand("curate", "Processa agora as mensagens pendentes na memória"),
 ]
 
@@ -73,6 +77,7 @@ class BotHandlers:
         verbose: bool = False,
         gateway_factory=TelegramGateway,
         briefing: BriefingScheduler | None = None,
+        tasks: TaskStore | None = None,
     ):
         self.conversation = conversation
         self.allowed_user_id = allowed_user_id
@@ -81,6 +86,7 @@ class BotHandlers:
         self.verbose = verbose  # imprime no console as consultas à memória de cada resposta
         self.gateway_factory = gateway_factory
         self.briefing = briefing  # resumo da manhã; None = desligado
+        self.tasks = tasks  # painel de tarefas com botões; None = desligado
         self._lock = asyncio.Lock()  # uma mensagem por vez: o histórico é sequencial
 
     def _authorized(self, update: Update) -> bool:
@@ -113,6 +119,54 @@ class BotHandlers:
         async with gateway.typing(chat_id):
             report = await asyncio.to_thread(self.conversation.curate_now)
         await gateway.send_text(chat_id, report)
+
+    async def on_todo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/todo [hoje|semana|pendentes] [etiqueta]: painel de tarefas com botões."""
+        if not self._authorized(update) or self.tasks is None:
+            return
+        gateway, chat_id = self.gateway_factory(context.bot), update.effective_chat.id
+        args = [a.lower() for a in (context.args or [])]
+        scope = "hoje"
+        if args and args[0] in panel.PANEL_SCOPES:
+            scope = args.pop(0)
+        await self._send_panel(gateway, chat_id, scope, args[0].lstrip("#") if args else "")
+
+    async def _send_panel(self, gateway, chat_id: int, scope: str, tag: str = "") -> None:
+        try:
+            text, rows = await asyncio.to_thread(panel.build_panel, self.tasks, scope, tag)
+        except Exception:  # noqa: BLE001 - o painel é um extra: nunca derruba a resposta
+            log.exception("erro ao montar o painel de tarefas")
+            return
+        if rows:
+            await gateway.send_buttons(chat_id, text, rows)
+        else:
+            await gateway.send_text(chat_id, text)
+
+    async def on_task_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Toque num botão do painel: inverte o estado da tarefa e redesenha o painel."""
+        query = update.callback_query
+        if query is None or not self._authorized(update) or self.tasks is None:
+            return
+        gateway = self.gateway_factory(context.bot)
+        parsed = panel.decode(query.data or "")
+        if parsed is None:
+            await gateway.answer_callback(query.id)
+            return
+        task_id, on, scope, tag = parsed
+        try:
+            text, done = await asyncio.to_thread(panel.toggle, self.tasks, task_id, on)
+            notice = f"{'✅ Concluída' if done else '⬜ Reaberta'}: {text}"
+        except TaskError as exc:
+            notice = f"Não deu: {exc}"
+        except Exception:  # noqa: BLE001
+            log.exception("erro ao alternar a tarefa %s", task_id)
+            notice = "Tive um problema ao atualizar a tarefa."
+        await gateway.answer_callback(query.id, notice[:190])
+        try:
+            new_text, rows = await asyncio.to_thread(panel.build_panel, self.tasks, scope, tag)
+            await gateway.edit_buttons(update.effective_chat.id, query.message.message_id, new_text, rows)
+        except Exception:  # noqa: BLE001 - ex.: "message is not modified"
+            log.warning("não consegui atualizar o painel de tarefas", exc_info=True)
 
     async def on_added_to_chat(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Bot adicionado a um canal ou grupo: mostra o ID no console, para usar em LOG_CHANNEL_ID
@@ -213,6 +267,13 @@ class BotHandlers:
         if self.verbose:
             self._log_trace(result)
         await gateway.send_text(chat_id, result.text)
+        if self.tasks is not None:  # o agente listou tarefas: mostra também o painel com botões
+            listing = next((e for e in reversed(result.trace)
+                            if e.name == "list_tasks" and not e.result.startswith("ERRO")), None)
+            if listing is not None:
+                scope = str(listing.args.get("scope") or "hoje").lower()
+                if scope in panel.PANEL_SCOPES:
+                    await self._send_panel(gateway, chat_id, scope, str(listing.args.get("tag") or ""))
         for att in result.files:
             try:
                 await gateway.send_file(chat_id, att)
@@ -371,6 +432,8 @@ def build_application(token: str, handlers: BotHandlers, service) -> Application
     app.add_handler(CommandHandler("start", handlers.on_start))
     app.add_handler(CommandHandler("status", handlers.on_status))
     app.add_handler(CommandHandler("curate", handlers.on_curate))
+    app.add_handler(CommandHandler("todo", handlers.on_todo))
+    app.add_handler(CallbackQueryHandler(handlers.on_task_toggle, pattern=r"^tk:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.on_message))
     app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, handlers.on_file))
     app.add_handler(MessageHandler(filters.COMMAND, handlers.on_unknown))  # sempre por último
@@ -422,7 +485,7 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     briefing = (BriefingScheduler(tasks, briefing_time.at, config.BRIEFING_STATE_FILE, log=history, tz=briefing_time.tz)
                 if briefing_time else None)
     handlers = BotHandlers(Conversation(history, service, agent, outbox), config.TELEGRAM_ALLOWED_USER_ID,
-                           registry, verbose=args.verbose, briefing=briefing)
+                           registry, verbose=args.verbose, briefing=briefing, tasks=tasks)
     app = application_factory(config.TELEGRAM_BOT_TOKEN, handlers, service)
     app.bot_data["log_handler"] = log_handler  # o envio dos logs ao canal começa no post_init
     app.bot_data["log_channel_id"] = log_channel

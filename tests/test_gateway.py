@@ -141,3 +141,32 @@ def test_register_commands_failure_does_not_raise(capsys):
     bot.set_my_commands.side_effect = RuntimeError("sem rede")
     run(TelegramGateway(bot).register_commands([], 42))
     assert "não consegui registrar os comandos" in capsys.readouterr().err
+
+
+def test_buttons_are_sent_edited_and_answered_through_the_bot():
+    import asyncio
+    from types import SimpleNamespace
+
+    from telegram_gateway import TelegramGateway
+
+    calls = []
+
+    class B:
+        async def send_message(self, **kw):
+            calls.append(("send", kw))
+            return SimpleNamespace(message_id=77)
+
+        async def edit_message_text(self, **kw):
+            calls.append(("edit", kw))
+
+        async def answer_callback_query(self, cid, text=None):
+            calls.append(("answer", cid, text))
+
+    gw = TelegramGateway(B())
+    rows = [[("⬜ Tarefa", "tk:a1b2:20261118:h:")]]
+    assert asyncio.run(gw.send_buttons(1, "Painel", rows)) == 77
+    asyncio.run(gw.edit_buttons(1, 77, "Painel", rows))
+    asyncio.run(gw.answer_callback("cb", "feito"))
+    keyboard = calls[0][1]["reply_markup"].inline_keyboard
+    assert keyboard[0][0].text == "⬜ Tarefa" and keyboard[0][0].callback_data == "tk:a1b2:20261118:h:"
+    assert calls[1][0] == "edit" and calls[2] == ("answer", "cb", "feito")

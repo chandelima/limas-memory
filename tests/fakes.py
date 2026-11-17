@@ -17,10 +17,23 @@ class FakeGateway:
         self.download_error = None
         self.send_file_error = None
         self.registered = None
+        self.panels, self.edits, self.answers = [], [], []
 
     async def send_text(self, chat_id, text, *, raw=False):
         self.texts.append((chat_id, text))
         self.events.append(("text", text))
+
+    async def send_buttons(self, chat_id, text, rows):
+        self.panels.append((chat_id, text, rows))
+        self.events.append(("buttons", text))
+        return 900 + len(self.panels)
+
+    async def edit_buttons(self, chat_id, message_id, text, rows):
+        self.edits.append((chat_id, message_id, text, rows))
+        self.events.append(("edit", text))
+
+    async def answer_callback(self, callback_id, text=""):
+        self.answers.append((callback_id, text))
 
     async def send_file(self, chat_id, attachment):
         if self.send_file_error:

@@ -10,7 +10,7 @@ import asyncio
 import re
 from contextlib import asynccontextmanager, suppress
 
-from telegram import BotCommandScopeChat, ReplyParameters
+from telegram import BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
 from telegram.constants import ChatAction
 
 from applog import get_logger
@@ -57,6 +57,24 @@ class TelegramGateway:
         (usado nos logs, onde `**` ou `#` podem ser parte do conteúdo)."""
         for chunk in split_message(text if raw else to_plain(text)) or ["(sem resposta)"]:
             await self.bot.send_message(chat_id=chat_id, text=chunk)
+
+    @staticmethod
+    def _keyboard(rows) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data) for label, data in row]
+                                     for row in rows])
+
+    async def send_buttons(self, chat_id: int, text: str, rows: list) -> int:
+        """Mensagem com botões (lista de linhas de (rótulo, callback_data)). Devolve o message_id."""
+        message = await self.bot.send_message(chat_id=chat_id, text=text, reply_markup=self._keyboard(rows))
+        return message.message_id
+
+    async def edit_buttons(self, chat_id: int, message_id: int, text: str, rows: list) -> None:
+        await self.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text,
+                                         reply_markup=self._keyboard(rows) if rows else None)
+
+    async def answer_callback(self, callback_id: str, text: str = "") -> None:
+        """Responde ao toque (some o "carregando" do botão; o texto vira um aviso rápido)."""
+        await self.bot.answer_callback_query(callback_id, text=text or None)
 
     async def send_file(self, chat_id: int, attachment) -> None:
         """Reenvia um arquivo pelo file_id, citando a mensagem original quando ela existir."""

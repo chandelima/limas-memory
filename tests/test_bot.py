@@ -408,7 +408,7 @@ def test_application_wiring(env):
     app = bot.build_application("123456:fake-token", handlers, FakeService())
     assert app.concurrent_updates > 1  # sem isso, um arquivo lento seguraria as mensagens seguintes
     registered = app.handlers[0]
-    assert len(registered) == 7 and registered[-1].callback == handlers.on_unknown
+    assert len(registered) == 9 and registered[-1].callback == handlers.on_unknown
     callbacks = [h.callback for h in registered]
     assert handlers.on_message in callbacks and handlers.on_file in callbacks
     handled = {c for h in registered if hasattr(h, "commands") for c in h.commands}
@@ -429,7 +429,7 @@ def test_post_init_registers_commands_starts_watcher_and_recovers_pending_messag
         await bot.post_shutdown(app)
 
     run(lifecycle())
-    assert env.gw.registered == (["status", "curate"], ALLOWED)
+    assert env.gw.registered == (["status", "todo", "curate"], ALLOWED)
     assert service.started and service.finished
     assert env.gw.sent()[0] == bot.RECOVERY_NOTICE and env.log.unfinished() == []
 
@@ -635,3 +635,62 @@ def test_automatic_report_goes_to_the_log_channel_when_configured():
     run(bot.notify_outcome(app, ok_outcome("Criados: 1 doc")))
     assert [cid for cid, _ in gw.texts] == [-100123]  # o usuário não recebe cópia
     assert "Criados: 1 doc" in gw.texts[0][1]
+
+
+# ---- painel de tarefas com botões ---------------------------------------------------------------
+
+
+def make_query(data, user_id=ALLOWED, message_id=900):
+    return SimpleNamespace(
+        callback_query=SimpleNamespace(id="cb1", data=data, message=SimpleNamespace(message_id=message_id)),
+        effective_user=SimpleNamespace(id=user_id),
+        effective_chat=SimpleNamespace(id=user_id, type="private"),
+    )
+
+
+@pytest.fixture
+def todo_env(env):
+    from datetime import date as _date
+
+    from tasks.store import TaskStore
+    tasks = TaskStore(MemoryStore(env.tmp_path / "memory"), today=lambda: _date(2026, 11, 18))
+    handlers = bot.BotHandlers(env.conv, ALLOWED, env.registry, gateway_factory=lambda _b: env.gw, tasks=tasks)
+    return SimpleNamespace(env=env, tasks=tasks, handlers=handlers)
+
+
+def test_todo_command_sends_the_panel_and_a_tap_toggles_and_redraws_it(todo_env):
+    from datetime import date as _date
+    task = todo_env.tasks.add("Trocar módulo IoT", _date(2026, 11, 18))
+    env = todo_env.env
+    ctx = SimpleNamespace(bot=object(), args=[])
+    run(todo_env.handlers.on_todo(make_update(text="/todo"), ctx))
+    chat, text, rows = env.gw.panels[0]
+    assert chat == ALLOWED and rows[0][0][0] == "⬜ Trocar módulo IoT"
+    run(todo_env.handlers.on_task_toggle(make_query(rows[0][0][1]), env.ctx))
+    assert env.gw.answers[-1][1].startswith("✅ Concluída")
+    assert env.gw.edits[-1][1] == 900 and env.gw.edits[-1][3][0][0][0] == "✅ Trocar módulo IoT"
+    run(todo_env.handlers.on_task_toggle(make_query(rows[0][0][1]), env.ctx))  # o mesmo botão desfaz
+    assert env.gw.answers[-1][1].startswith("⬜ Reaberta")
+    assert [t.id for t in todo_env.tasks.load().pending] == [task.id]
+
+
+def test_tap_from_a_stranger_or_garbage_or_missing_task_does_nothing_harmful(todo_env):
+    env = todo_env.env
+    run(todo_env.handlers.on_task_toggle(make_query("tk:a1b2:20261118:h:", user_id=999), env.ctx))
+    assert env.gw.answers == [] and env.gw.edits == []
+    run(todo_env.handlers.on_task_toggle(make_query("lixo"), env.ctx))
+    assert env.gw.answers == [("cb1", "")] and env.gw.edits == []
+    run(todo_env.handlers.on_task_toggle(make_query("tk:zzzz:20261118:h:"), env.ctx))
+    assert "não existe" in env.gw.answers[-1][1]
+
+
+def test_panel_follows_the_agent_reply_when_it_listed_tasks(todo_env):
+    from datetime import date as _date
+    todo_env.tasks.add("Dentista", _date(2026, 11, 18))
+    env = todo_env.env
+    env.state.trace = [ToolEvent("list_tasks", {"scope": "hoje"}, "Hoje é ...\n- [a1b2] Dentista")]
+    run(todo_env.handlers.on_message(make_update(text="o que tenho hoje?"), env.ctx))
+    assert env.gw.index("text") < env.gw.index("buttons") and len(env.gw.panels) == 1
+    env.state.trace = [ToolEvent("list_tasks", {"scope": "concluidas"}, "...")]  # sem painel para esse escopo
+    run(todo_env.handlers.on_message(make_update(text="e as feitas?"), env.ctx))
+    assert len(env.gw.panels) == 1
