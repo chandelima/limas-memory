@@ -18,13 +18,15 @@ PAGE_SIZE = 50
 SEARCH_LIMIT = 20
 
 
-def build_tools(store: MemoryStore, git: MemoryGit) -> list[BaseTool]:
+def build_read_tools(store: MemoryStore) -> list[BaseTool]:
+    """Tools SOMENTE de leitura (usadas pelo Curator e pelo agente de resposta)."""
+
     @tool
     def list_memory(folder: str = "", page: int = 1) -> str:
         """Lista documentos da memória (caminho e description), 50 por página.
         Sem `folder`, mostra também as pastas com a contagem de documentos; use
         `folder` (ex.: 'pessoas' ou '(raiz)') para filtrar e `page` para continuar.
-        Use antes de escrever, para evitar duplicados."""
+        Use primeiro, para saber o que existe antes de buscar ou ler."""
         if page < 1:
             return "ERRO: page deve ser >= 1"
         total = store.count_docs(folder)
@@ -50,7 +52,7 @@ def build_tools(store: MemoryStore, git: MemoryGit) -> list[BaseTool]:
     @tool
     def search_memory(query: str) -> str:
         """Busca um texto (sem diferenciar maiúsculas) em todos os documentos.
-        Devolve caminho, linha e trecho. Use para checar se um assunto já existe."""
+        Devolve caminho, linha e trecho. Use para checar se um assunto existe."""
         try:
             hits = store.search_docs(query, limit=SEARCH_LIMIT + 1)
         except StoreError as exc:
@@ -69,6 +71,12 @@ def build_tools(store: MemoryStore, git: MemoryGit) -> list[BaseTool]:
             return store.read_doc(path)
         except StoreError as exc:
             return f"ERRO: {exc}"
+
+    return [list_memory, search_memory, read_memory]
+
+
+def build_tools(store: MemoryStore, git: MemoryGit) -> list[BaseTool]:
+    """Todas as tools do Curator: leitura + escrita, índice e commit."""
 
     @tool
     def write_memory(path: str, content: str) -> str:
@@ -114,7 +122,7 @@ def build_tools(store: MemoryStore, git: MemoryGit) -> list[BaseTool]:
             return f"OK: commit {result.sha} enviado ao remote."
         return f"OK: commit {result.sha} salvo localmente. Push pendente: {result.push_error}"
 
-    return [list_memory, search_memory, read_memory, write_memory, update_index, commit_memory]
+    return [*build_read_tools(store), write_memory, update_index, commit_memory]
 
 
 def make_store_and_git(memory_dir: Path | None = None) -> tuple[MemoryStore, MemoryGit]:
