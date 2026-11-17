@@ -50,8 +50,15 @@ FORMATO DOS DOCUMENTOS:
 - Quando um documento crescer demais, DIVIDA-O em
   documentos menores ligados por links Markdown.
   Nunca resuma ou comprima conteúdo existente.
-- Registre a origem (ex.: data e canal da mensagem)
-  no frontmatter ou no texto.
+- Registre a origem (data e, se informado, o canal) no
+  frontmatter ou no texto, UMA vez por documento ou
+  seção quando for a mesma; não repita em cada item.
+- O canal só pode ser registrado se a entrada trouxer
+  `CANAL:` com um valor conhecido. Nunca deduza ou
+  invente o canal; com "desconhecido", omita-o.
+- Crie links Markdown apenas entre assuntos realmente
+  relacionados. Não force links entre assuntos sem
+  relação.
 - Use datas absolutas (AAAA-MM-DD). Converta expressões
   relativas ("ano que vem", "ontem") usando a DATA E
   HORA ATUAIS fornecidas na entrada. Nunca escreva

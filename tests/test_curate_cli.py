@@ -99,3 +99,36 @@ def test_main_without_api_key_returns_1(tmp_path, monkeypatch, capsys):
     conv.write_text("usuario: oi\n", encoding="utf-8")
     assert cli.main([str(conv), "--memory-dir", str(tmp_path / "m")]) == 1
     assert "OPENROUTER_API_KEY" in capsys.readouterr().err
+
+
+def test_describe_args_truncates_long_values():
+    out = cli.describe_args({"path": "a.md", "content": "x" * 200})
+    assert "path='a.md'" in out and "(200 chars)" in out and "x" * 100 not in out
+
+
+def test_verbose_shows_each_tool_and_result(tmp_path, capsys):
+    mem = tmp_path / "memoria"
+    conv = tmp_path / "conv.txt"
+    conv.write_text("usuario: oi\n", encoding="utf-8")
+    store, git = MemoryStore(mem), MemoryGit(mem)
+    script = [
+        tool_call("write_memory", {"path": "a.md", "content": "sem frontmatter"}, "1"),
+        AIMessage(content="Falhou."),
+    ]
+    agent = build_curator(llm=ScriptedModel(responses=script), tools=build_tools(store, git))
+    cli.main([str(conv), "--memory-dir", str(mem), "--verbose"], agent=agent)
+    out = capsys.readouterr().out
+    assert "== Detalhe das tools ==" in out
+    assert "1. write_memory(path='a.md'" in out and "-> ERRO" in out
+
+
+def test_default_output_has_no_tool_detail(tmp_path, capsys):
+    mem = tmp_path / "memoria"
+    conv = tmp_path / "conv.txt"
+    conv.write_text("usuario: oi\n", encoding="utf-8")
+    store, git = MemoryStore(mem), MemoryGit(mem)
+    agent = build_curator(
+        llm=ScriptedModel(responses=[AIMessage(content="Nada.")]), tools=build_tools(store, git)
+    )
+    cli.main([str(conv), "--memory-dir", str(mem)], agent=agent)
+    assert "Detalhe das tools" not in capsys.readouterr().out

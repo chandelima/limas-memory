@@ -5,6 +5,7 @@ Uso:
     python src/curate.py conversa.txt --context "Papo sobre hábitos"
     type conversa.txt | python src/curate.py -
     python src/curate.py ex.txt --memory-dir D:/tmp/memoria-teste   # não toca na memória real
+    python src/curate.py ex.txt --verbose    # mostra cada chamada de tool e o resultado
 
 Formato da conversa: uma mensagem por linha, com prefixo `usuario:` ou `assistente:`.
 Linhas sem prefixo continuam a mensagem anterior (ou formam uma mensagem do usuário).
@@ -25,6 +26,18 @@ _ROLE_NAMES = {
     "assistente": "assistente", "assistant": "assistente",
 }
 MAX_DIFF_LINES = 200
+MAX_VALUE_CHARS = 80
+MAX_RESULT_CHARS = 300
+
+
+def describe_args(args: dict) -> str:
+    parts = []
+    for key, value in args.items():
+        text = str(value)
+        if len(text) > MAX_VALUE_CHARS:
+            text = f"{text[:MAX_VALUE_CHARS]}...({len(text)} chars)"
+        parts.append(f"{key}={text!r}")
+    return ", ".join(parts)
 
 
 def parse_conversation(text: str) -> list[ChatMessage]:
@@ -48,6 +61,8 @@ def main(argv: list[str] | None = None, agent=None) -> int:
     ap = argparse.ArgumentParser(description="Roda o Memory Curator sobre uma conversa.")
     ap.add_argument("conversa", help="arquivo .txt com a conversa, ou '-' para stdin")
     ap.add_argument("--context", default="", help="contexto adicional da conversa")
+    ap.add_argument("--channel", default="teste (CLI)", help="canal informado ao Curator")
+    ap.add_argument("--verbose", action="store_true", help="mostra cada tool e seu resultado")
     ap.add_argument("--memory-dir", type=Path, default=None,
                     help="pasta da memória (padrão: MEMORY_DIR / ./memory)")
     args = ap.parse_args(argv)
@@ -72,10 +87,18 @@ def main(argv: list[str] | None = None, agent=None) -> int:
 
     print(f"Memória: {memory_dir}")
     print(f"Mensagens: {len(messages)}\n")
-    result = curate(messages, args.context, agent=agent)
+    result = curate(messages, args.context, agent=agent, channel=args.channel)
 
     print("== Tools chamadas ==")
     print(" -> ".join(result.tool_calls) or "(nenhuma)")
+    if args.verbose:
+        print("\n== Detalhe das tools ==")
+        for i, event in enumerate(result.trace, 1):
+            print(f"{i}. {event.name}({describe_args(event.args)})")
+            shown = event.result.strip().replace("\n", " | ")
+            if len(shown) > MAX_RESULT_CHARS:
+                shown = shown[:MAX_RESULT_CHARS] + "..."
+            print(f"   -> {shown}")
     print("\n== Relatório do Curator ==")
     print(result.report or "(sem relatório)")
 

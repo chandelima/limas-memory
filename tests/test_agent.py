@@ -110,3 +110,44 @@ def test_prompt_guides_dates_quotes_and_no_process_notes():
     assert "datas absolutas" in prompt and "DATA E" in prompt
     assert "entre aspas" in prompt
     assert "processo do Curator" in prompt
+
+
+def test_format_input_includes_channel_with_default():
+    assert "CANAL: desconhecido" in format_input([ChatMessage("usuario", "oi")])
+    assert "CANAL: Telegram" in format_input([ChatMessage("usuario", "oi")], channel="Telegram")
+
+
+def test_prompt_forbids_inventing_channel_and_forcing_links():
+    prompt = load_system_prompt()
+    assert "Nunca deduza ou\n  invente o canal" in prompt
+    assert "Não force links" in prompt
+    assert "UMA vez por documento" in prompt
+
+
+def test_curator_uses_temperature_zero(monkeypatch):
+    import curator.agent as agent_mod
+
+    seen = {}
+
+    def fake_get_llm(**kwargs):
+        seen.update(kwargs)
+        return ScriptedModel(responses=[AIMessage(content="ok")])
+
+    monkeypatch.setattr(agent_mod, "get_llm", fake_get_llm)
+    build_curator(tools=[])
+    assert seen == {"temperature": 0}
+
+
+def test_trace_pairs_each_call_with_its_result(mem):
+    root, tools, _ = mem
+    script = [
+        call("write_memory", {"path": "a.md", "content": "sem frontmatter"}, "1"),
+        call("write_memory", {"path": "a.md", "content": DOC}, "2"),
+        AIMessage(content="ok"),
+    ]
+    agent = build_curator(llm=ScriptedModel(responses=script), tools=tools)
+    result = curate([ChatMessage("usuario", "x")], agent=agent, channel="Telegram")
+    assert [e.name for e in result.trace] == ["write_memory", "write_memory"]
+    assert result.trace[0].result.startswith("ERRO")
+    assert result.trace[1].result.startswith("OK")
+    assert result.trace[1].args["path"] == "a.md"

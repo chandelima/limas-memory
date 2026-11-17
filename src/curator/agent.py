@@ -8,7 +8,7 @@ from datetime import datetime
 
 from langchain.agents import create_agent
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 import config
 from curator.tools import default_tools
@@ -25,9 +25,20 @@ class ChatMessage:
 
 
 @dataclass
+class ToolEvent:
+    name: str
+    args: dict
+    result: str
+
+
+@dataclass
 class CurateResult:
     report: str
-    tool_calls: list[str] = field(default_factory=list)  # nomes, na ordem
+    trace: list[ToolEvent] = field(default_factory=list)  # chamadas, na ordem
+
+    @property
+    def tool_calls(self) -> list[str]:
+        return [e.name for e in self.trace]
 
 
 def load_system_prompt() -> str:
@@ -36,8 +47,9 @@ def load_system_prompt() -> str:
 
 def build_curator(llm: BaseChatModel | None = None, tools: list | None = None):
     """Monta o agente. Sem argumentos, usa o modelo e a memória configurados por env."""
+    # temperature=0: a memória é permanente e versionada; queremos consistência.
     return create_agent(
-        model=llm or get_llm(),
+        model=llm or get_llm(temperature=0),
         tools=tools if tools is not None else default_tools(),
         system_prompt=load_system_prompt(),
         name="memory_curator",
@@ -45,10 +57,17 @@ def build_curator(llm: BaseChatModel | None = None, tools: list | None = None):
 
 
 def format_input(
-    messages: list[ChatMessage], context: str = "", now: datetime | None = None
+    messages: list[ChatMessage],
+    context: str = "",
+    now: datetime | None = None,
+    channel: str = "desconhecido",
 ) -> str:
     now = now or datetime.now().astimezone()
-    lines = [f"DATA E HORA ATUAIS: {now.isoformat(timespec='minutes')}", ""]
+    lines = [
+        f"DATA E HORA ATUAIS: {now.isoformat(timespec='minutes')}",
+        f"CANAL: {channel}",
+        "",
+    ]
     if context.strip():
         lines += ["CONTEXTO DA CONVERSA:", context.strip(), ""]
     lines.append("MENSAGENS RECENTES:")
@@ -60,18 +79,28 @@ def format_input(
 
 
 def curate(
-    messages: list[ChatMessage], context: str = "", agent=None, now: datetime | None = None
+    messages: list[ChatMessage],
+    context: str = "",
+    agent=None,
+    now: datetime | None = None,
+    channel: str = "desconhecido",
 ) -> CurateResult:
     if not messages:
         raise ValueError("Nenhuma mensagem para curar")
     agent = agent or build_curator()
     state = agent.invoke(
-        {"messages": [HumanMessage(format_input(messages, context, now))]},
+        {"messages": [HumanMessage(format_input(messages, context, now, channel))]},
         config={"recursion_limit": RECURSION_LIMIT},
     )
     out = state["messages"]
-    calls = [c["name"] for m in out if isinstance(m, AIMessage) for c in m.tool_calls]
+    results = {m.tool_call_id: str(m.content) for m in out if isinstance(m, ToolMessage)}
+    trace = [
+        ToolEvent(c["name"], c["args"], results.get(c["id"], ""))
+        for m in out
+        if isinstance(m, AIMessage)
+        for c in m.tool_calls
+    ]
     report = next(
         (m.text for m in reversed(out) if isinstance(m, AIMessage) and not m.tool_calls), ""
     )
-    return CurateResult(report=report.strip(), tool_calls=calls)
+    return CurateResult(report=report.strip(), trace=trace)
