@@ -7,13 +7,15 @@ Uso:
 Só o usuário em TELEGRAM_ALLOWED_USER_ID é atendido (e só em conversa privada). Sem essa
 env, o bot recusa todo mundo e imprime o ID de quem escreveu, para você configurá-la.
 Cada mensagem vai para o histórico; o agente de resposta lê a memória (somente leitura);
-depois de CURATOR_IDLE_SECONDS sem mensagens, o Curator processa o que ficou pendente.
+depois de CURATOR_IDLE_SECONDS sem mensagens, o Curator processa o que ficou pendente e o
+relatório é enviado a você (uma falha é avisada uma vez por sequência).
 Comandos: /status e /curate (não vão para o modelo).
 """
 
 import argparse
 import asyncio
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -32,6 +34,15 @@ TYPING_INTERVAL = 4  # o indicador "digitando..." dura ~5s
 SHUTDOWN_WAIT = 30  # espera máxima por uma curadoria em andamento ao encerrar
 
 HELP = "Pode conversar comigo normalmente.\n/status mostra o estado da memória.\n/curate processa agora o que ficou pendente."
+
+
+def to_plain(text: str) -> str:
+    """O bot envia texto simples (sem parse_mode): tira a marcação Markdown que os
+    modelos às vezes usam (**negrito**, __negrito__, `código`, títulos com #)."""
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"`+([^`\n]+)`+", r"\1", text)
+    return re.sub(r"^#{1,6}[ \t]+", "", text, flags=re.MULTILINE)
 
 
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
@@ -69,7 +80,7 @@ class BotHandlers:
         return user.id == self.allowed_user_id
 
     async def _reply(self, update: Update, text: str) -> None:
-        for chunk in split_message(text) or ["(sem resposta)"]:
+        for chunk in split_message(to_plain(text)) or ["(sem resposta)"]:
             await update.message.reply_text(chunk)
 
     async def _keep_typing(self, update: Update) -> None:
@@ -135,6 +146,30 @@ async def register_commands(bot, allowed_user_id: int | None) -> None:
               file=sys.stderr, flush=True)
 
 
+async def notify_outcome(app: Application, outcome) -> None:
+    """Curadoria automática terminou: mostra no console e envia o relatório ao usuário.
+
+    Falhas são avisadas uma vez por sequência (o serviço tenta de novo a cada poucos
+    minutos; sem isso seriam várias mensagens iguais). Um sucesso reinicia a contagem.
+    """
+    text = describe_outcome(outcome)
+    print(text, flush=True)
+    allowed = app.bot_data.get("allowed_user_id")
+    if allowed is None:
+        return
+    if outcome.error:
+        if app.bot_data.get("failure_notified"):
+            return
+        app.bot_data["failure_notified"] = True
+    else:
+        app.bot_data["failure_notified"] = False
+    try:
+        for chunk in split_message(to_plain(text)):
+            await app.bot.send_message(chat_id=allowed, text=chunk)
+    except Exception as exc:  # noqa: BLE001 - falhar ao avisar não pode derrubar o bot
+        print(f"[bot] não consegui enviar o relatório: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+
 async def post_init(app: Application) -> None:
     """Registra os comandos e liga o laço que dispara o Curator por inatividade."""
     await register_commands(app.bot, app.bot_data.get("allowed_user_id"))
@@ -142,7 +177,7 @@ async def post_init(app: Application) -> None:
     service = app.bot_data["service"]
     app.bot_data["stop"] = stop
     app.bot_data["watcher"] = asyncio.create_task(
-        service.watch(stop, WATCH_INTERVAL, on_outcome=lambda o: print(describe_outcome(o), flush=True))
+        service.watch(stop, WATCH_INTERVAL, on_outcome=lambda outcome: notify_outcome(app, outcome))
     )
 
 

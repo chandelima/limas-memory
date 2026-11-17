@@ -128,7 +128,8 @@ def test_run_now_is_ignored_while_another_curation_is_running(log):
 
     s = service(log, reentrant)
     holder["service"] = s
-    assert s.run_now().ok and holder["inner"] is None
+    assert s.run_now().ok
+    assert holder["inner"].busy and holder["inner"].messages == 0  # avisa que está ocupado
 
 
 def test_seconds_idle_and_due(log):

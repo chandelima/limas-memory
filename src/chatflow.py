@@ -33,6 +33,8 @@ def build_service(
 
 
 def describe_outcome(outcome: Outcome) -> str:
+    if outcome.busy:
+        return "[curador] já há uma curadoria em andamento; aguarde ela terminar."
     if outcome.error:
         return f"[curador] falhou; {outcome.messages} mensagem(ns) seguem pendentes: {outcome.error}"
     tools = " -> ".join(outcome.result.tool_calls) or "nenhuma tool"
@@ -46,6 +48,8 @@ def describe_status(service: CurationService) -> str:
     pending = len(service.log.pending())
     idle = service.seconds_idle()
     parts = [f"pendentes: {pending}"]
+    if service.is_running:
+        parts.append("curadoria em andamento")
     if idle is not None:
         parts.append(f"inativo há {idle:.0f}s (curadoria após {service.idle_seconds:.0f}s)")
     if service.last_error:

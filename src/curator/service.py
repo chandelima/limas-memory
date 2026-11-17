@@ -4,6 +4,7 @@ periodicamente (ou `watch()`, em asyncio) e `run_now()` para forçar.
 """
 
 import asyncio
+import inspect
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,6 +24,7 @@ class Outcome:
     messages: int  # quantas mensagens pendentes foram enviadas ao Curator
     result: CurateResult | None = None
     error: str = ""
+    busy: bool = False  # já havia uma curadoria em andamento; nada foi feito agora
 
     @property
     def ok(self) -> bool:
@@ -65,6 +67,10 @@ class CurationService:
 
     # ---- estado -----------------------------------------------------------
 
+    @property
+    def is_running(self) -> bool:
+        return self._busy.locked()
+
     def seconds_idle(self, now: datetime | None = None) -> float | None:
         last = self.log.last_message_at()
         if last is None:
@@ -91,13 +97,15 @@ class CurationService:
         now = now or datetime.now().astimezone()
         if not self.due(now):
             return None
-        return self.run_now(now)
+        outcome = self.run_now(now)
+        return None if outcome is not None and outcome.busy else outcome
 
     def run_now(self, now: datetime | None = None) -> Outcome | None:
         """Cura as mensagens pendentes agora, sem esperar a inatividade.
-        None se não há nada pendente ou se já há uma curadoria em andamento."""
+        None se não há nada pendente; Outcome(busy=True) se já há uma curadoria em
+        andamento (nada é feito)."""
         if not self._busy.acquire(blocking=False):
-            return None
+            return Outcome(0, busy=True)
         try:
             pending = self.log.pending()
             if not pending:
@@ -120,13 +128,18 @@ class CurationService:
         self,
         stop: asyncio.Event,
         interval: float = 30,
-        on_outcome: Callable[[Outcome], None] | None = None,
+        on_outcome: Callable[[Outcome], object] | None = None,
     ) -> None:
         """Laço asyncio: verifica a cada `interval` s, sem bloquear o loop de eventos."""
         while not stop.is_set():
             outcome = await asyncio.to_thread(self.tick)
             if outcome and on_outcome:
-                on_outcome(outcome)
+                try:
+                    result = on_outcome(outcome)
+                    if inspect.isawaitable(result):  # o callback pode ser assíncrono
+                        await result
+                except Exception as exc:  # noqa: BLE001 - um callback com defeito não derruba o laço
+                    print(f"[curador] erro ao tratar o resultado: {type(exc).__name__}: {exc}")
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
             except asyncio.TimeoutError:
