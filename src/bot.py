@@ -31,6 +31,7 @@ from attachments.tools import build_attachment_tools
 from chatflow import Conversation, build_service, describe_outcome
 from conversation.log import ConversationLog
 from responder.agent import build_responder, default_read_tools
+from storage.store import MemoryStore
 
 TELEGRAM_LIMIT = 4096  # tamanho máximo de uma mensagem do Telegram
 WATCH_INTERVAL = 30  # segundos entre verificações de inatividade
@@ -308,8 +309,6 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
                     help="arquivo do histórico (padrão: CONVERSATION_FILE / ./data/conversa.json)")
     ap.add_argument("--idle-seconds", type=float, default=config.CURATOR_IDLE_SECONDS,
                     help="inatividade antes de o Curator processar (padrão: CURATOR_IDLE_SECONDS)")
-    ap.add_argument("--attachments", type=Path, default=None,
-                    help="tabela de anexos (padrão: ATTACHMENTS_FILE / ./data/anexos.json)")
     ap.add_argument("--verbose", action="store_true",
                     help="imprime no console as consultas à memória de cada resposta")
     args = ap.parse_args(argv)
@@ -317,7 +316,7 @@ def main(argv=None, agent=None, application_factory=build_application) -> int:
     if not config.TELEGRAM_BOT_TOKEN:
         print("Erro: defina TELEGRAM_BOT_TOKEN no ambiente ou no .env (token do @BotFather)", file=sys.stderr)
         return 1
-    registry = AttachmentRegistry(args.attachments or config.ATTACHMENTS_FILE)
+    registry = AttachmentRegistry(MemoryStore(args.memory_dir or config.MEMORY_DIR))
     outbox: list = []  # arquivos que o agente pede para reenviar na resposta atual
     if agent is None:
         try:

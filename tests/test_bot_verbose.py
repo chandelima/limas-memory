@@ -73,6 +73,6 @@ def test_main_passes_verbose_flag_to_handlers(monkeypatch, tmp_path):
         return MagicMock()
 
     for flags, expected in (([], False), (["--verbose"], True)):
-        bot.main(["--log", str(tmp_path / "c.json"), "--attachments", str(tmp_path / "a.json"), *flags],
+        bot.main(["--log", str(tmp_path / "c.json"), "--memory-dir", str(tmp_path / "mem"), *flags],
                  agent=object(), application_factory=factory)
         assert seen["verbose"] is expected

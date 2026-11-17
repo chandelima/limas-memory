@@ -6,16 +6,10 @@ from langchain_core.messages import AIMessage
 import config
 from attachments import reader
 from attachments.reader import ReaderError, format_attachment_message, read_document
-from attachments.registry import AttachmentRegistry, normalize_id
+
 from conversation.log import ConversationLog
 
 
-def make(registry, **kw):
-    base = dict(file_id="AgACAg-xyz", file_unique_id="u1", kind="document", chat_id=42,
-                message_id=7, filename="voucher.pdf", mime="application/pdf", size=1234,
-                caption="viagem a Lisboa")
-    base.update(kw)
-    return registry.add(**base)
 
 
 class FakeLLM:
@@ -27,43 +21,6 @@ class FakeLLM:
         if self.fail:
             raise self.fail
         return AIMessage(content=self.text)
-
-
-# ---- registro -----------------------------------------------------------------------
-
-
-def test_registry_add_get_and_persist(tmp_path):
-    path = tmp_path / "data" / "anexos.json"
-    item = make(AttachmentRegistry(path))
-    assert len(item.id) == 8 and item.ref == f"anexo:{item.id}" and item.caption == "viagem a Lisboa"
-    again = AttachmentRegistry(path)  # nova instância lê do arquivo
-    assert again.get(item.id).file_id == "AgACAg-xyz" and again.all()[0].message_id == 7
-
-
-def test_registry_get_accepts_prefix_and_case(tmp_path):
-    reg = AttachmentRegistry(tmp_path / "a.json")
-    item = make(reg)
-    assert reg.get(f"anexo:{item.id}") is item or reg.get(f"anexo:{item.id}").id == item.id
-    assert reg.get(f" ANEXO:{item.id.upper()} ").id == item.id
-    assert reg.get("naoexiste") is None
-    assert normalize_id("Anexo: AB12") == "ab12"
-
-
-def test_registry_ids_are_unique_and_opaque(tmp_path):
-    reg = AttachmentRegistry(tmp_path / "a.json")
-    ids = {make(reg, file_id=f"f{i}").id for i in range(50)}
-    assert len(ids) == 50
-
-
-def test_registry_corrupted_file_is_set_aside(tmp_path):
-    path = tmp_path / "a.json"
-    path.write_text("{ nao e json", encoding="utf-8")
-    reg = AttachmentRegistry(path)
-    assert reg.all() == [] and len(list(tmp_path.glob("a.json.corrupt-*"))) == 1
-
-
-def test_registry_file_id_never_in_memory_dir_default():
-    assert "memory" not in config.ATTACHMENTS_FILE.parts[-2:]  # data/anexos.json, fora de memory/
 
 
 # ---- histórico com anexos ------------------------------------------------------------

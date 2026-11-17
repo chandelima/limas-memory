@@ -15,6 +15,13 @@ from storage import markdown as md
 
 MAX_LINES = 300  # acima disso, avisa para dividir o documento
 ROOT_FOLDER = "(raiz)"  # nome da "pasta" dos documentos soltos na raiz
+# Pastas gerenciadas por código (não pelo Curator): só `write_doc(..., internal=True)` grava
+# nelas, e ficam fora de list_docs, search_docs e do índice. Leitura (read_doc) é permitida.
+PROTECTED_FOLDERS = ("anexos",)
+
+
+def is_protected(rel_path: str) -> bool:
+    return rel_path.split("/", 1)[0] in PROTECTED_FOLDERS
 
 _SECRET_PATTERNS = {
     "chave sk-": re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"),
@@ -99,7 +106,7 @@ class MemoryStore:
 
     def _doc_paths(self, folder: str = "") -> list[str]:
         """Caminhos dos documentos (sem index.md), opcionalmente de uma pasta."""
-        paths = [r for r in self.list_paths() if r != "index.md"]
+        paths = [r for r in self.list_paths() if r != "index.md" and not is_protected(r)]
         folder = folder.strip().strip("/")
         if not folder:
             return paths
@@ -150,6 +157,8 @@ class MemoryStore:
             raise StoreError("Consulta vazia")
         hits: list[SearchHit] = []
         for p in self._iter_docs():
+            if is_protected(self._rel(p)):
+                continue
             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
                 if q in line.lower():
                     hits.append(SearchHit(self._rel(p), n, line.strip()))
@@ -159,8 +168,15 @@ class MemoryStore:
 
     # ---- escrita ----------------------------------------------------------
 
-    def write_doc(self, rel_path: str, content: str) -> WriteResult:
+    def write_doc(self, rel_path: str, content: str, internal: bool = False) -> WriteResult:
+        """Grava um documento. `internal=True` é para código (não o Curator): permite as
+        pastas protegidas e dispensa a busca de segredos (metadados mecânicos)."""
         full = self._resolve(rel_path)
+        if is_protected(self._rel(full)) and not internal:
+            raise StoreError(
+                f"A pasta {self._rel(full).split('/', 1)[0]}/ é gerenciada pelo bot: "
+                "não crie nem altere documentos nela"
+            )
 
         meta, body = _parse(content)
         description = str(meta.get("description", "")).strip()
@@ -171,7 +187,7 @@ class MemoryStore:
         if not body.strip():
             raise StoreError("Documento sem conteúdo")
 
-        for name, pattern in _SECRET_PATTERNS.items():
+        for name, pattern in ({} if internal else _SECRET_PATTERNS).items():
             if pattern.search(content):
                 raise StoreError(
                     f"Possível segredo detectado ({name}); a memória vai para o GitHub"

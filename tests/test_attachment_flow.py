@@ -35,7 +35,7 @@ def run(coro):
 
 @pytest.fixture
 def registry(tmp_path):
-    return AttachmentRegistry(tmp_path / "anexos.json")
+    return AttachmentRegistry(MemoryStore(tmp_path / "memoria-anexos"))
 
 
 def add_att(registry, **kw):
@@ -287,7 +287,7 @@ def test_main_gives_the_responder_the_send_attachment_tool(monkeypatch, tmp_path
     monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "123456:fake-token")
     seen = {}
     monkeypatch.setattr(bot, "build_responder", lambda tools: seen.update(names=[t.name for t in tools]) or object())
-    code = bot.main(["--memory-dir", str(tmp_path / "m"), "--log", str(tmp_path / "c.json"),
-                     "--attachments", str(tmp_path / "a.json")], application_factory=lambda *a: MagicMock())
+    code = bot.main(["--memory-dir", str(tmp_path / "m"), "--log", str(tmp_path / "c.json")],
+                    application_factory=lambda *a: MagicMock())
     assert code == 0
     assert seen["names"] == ["list_memory", "search_memory", "read_memory", "send_attachment"]

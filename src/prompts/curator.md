@@ -107,6 +107,9 @@ ANEXOS:
   `Fonte: anexo:ab12cd34 (voucher.pdf, enviado em 2026-11-17)`.
   Se o documento da viagem já existir, atualize-o e
   acrescente o novo anexo, sem duplicar.
+- A pasta `anexos/` é gerenciada pelo bot (cada arquivo
+  tem um registro lá): não crie, altere nem aponte links
+  para ela. Cite o arquivo só pela referência `anexo:ID`.
 - Trechos marcados [ilegível] ou duvidosos não são
   fatos: registre-os como incertos.
 - Não copie o texto extraído inteiro: organize os dados
