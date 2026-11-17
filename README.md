@@ -115,21 +115,24 @@ All settings are environment variables (`.env` is loaded automatically). See `.e
 | `LOG_CHANNEL_ID` | off | Telegram channel for logs (`-100…` or `@name`); the bot must be a channel **admin** that can post |
 | `LOG_CHANNEL_LEVEL` | `WARNING` | Minimum level sent to the channel |
 | `LOG_CHANNEL_HEADER` | empty | Text on top of each batch, for shared channels |
-| `MEMORY_DIR`, `CONVERSATION_FILE`, `BRIEFING_STATE_FILE` | `./memory`, `./data/conversa.json`, `./data/briefing.json` | Locations |
+| `MEMORY_DIR`, `CONVERSATION_FILE`, `BRIEFING_STATE_FILE` | `./memory`, `./data/conversation.json`, `./data/briefing.json` | Locations |
 
 ## Docker
 
 ```bash
-cp .env.example .env     # fill it in
+cp .env.example .env     # fill it in (Compose reads it for the ${...} values)
 docker compose up -d --build
 docker compose logs -f
 ```
 
-- The image contains only the code. Secrets stay in `.env`; state lives in two bind mounts: `./memory` (the memory
-  git repository) and `./data` (conversation history and briefing state).
-- `TZ` (default `America/Recife`, override it in the shell or a `.env` entry read by Compose) defines what "today"
-  means for tasks. `BRIEFING_TIME` may carry its own zone.
-- The container runs as a non-root user (uid 1000); make sure it can write to the two mounted folders.
+- The image contains only the code. Secrets come from the environment of the stack. Locally that is the `.env`
+  next to `docker-compose.yml`; in **Portainer** (stack from a Git repository) add each variable under
+  *Environment variables* (the repository has no `.env`). `OPENROUTER_API_KEY` and `TELEGRAM_BOT_TOKEN` are required.
+- State lives in two named volumes: `memory` (the memory git repository) and `data` (conversation history and
+  briefing state). To start from an existing memory, copy it into the `memory` volume, for example
+  `docker cp ./memory/. <container>:/memory` followed by `docker compose restart`.
+  The container runs as uid 1000, so fix the ownership if needed: `docker exec -u 0 <container> chown -R 1000 /memory /data`.
+- `TZ` (default `America/Recife`) defines what "today" means for tasks. `BRIEFING_TIME` may carry its own zone.
 - On shutdown the bot waits up to 30 s for a running curation to finish.
 
 ## Development
@@ -172,6 +175,6 @@ python evals/compare.py --models openai/gpt-6-luna,anthropic/claude-haiku-5.5 --
 
 - The memory can hold sensitive data (vouchers, reservation codes) because you asked it to keep everything. Use a
   **private** remote.
-- `data/conversa.json` keeps the last 50 curated messages in plain text on disk (they give the chat agent its
+- `data/conversation.json` keeps the last 50 curated messages in plain text on disk (they give the chat agent its
   conversational context). It is git-ignored.
 - Prompts and the memory are sent to the model provider you configure on OpenRouter.

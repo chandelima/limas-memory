@@ -3,13 +3,36 @@ services:
     build: .
     image: limas-memory
     restart: unless-stopped
-    env_file: .env            # chaves e tokens ficam no .env, fora da imagem
+    # No env_file: Portainer (stack from a Git repository) has no .env in the checkout.
+    # The values come from the environment of the stack (Portainer: "Environment variables";
+    # locally: the .env next to this file, which Compose reads for the ${...} below).
     environment:
-      TZ: ${TZ:-America/Recife}   # define o "hoje" das tarefas; BRIEFING_TIME pode ter o próprio fuso
-      MEMORY_DIR: /memory         # os caminhos do container valem mais que os do .env
-      CONVERSATION_FILE: /data/conversa.json
+      TZ: ${TZ:-America/Recife}   # defines "today" for tasks; BRIEFING_TIME may carry its own zone
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ALLOWED_USER_ID: ${TELEGRAM_ALLOWED_USER_ID:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-6-luna}
+      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-}
+      PDF_ENGINE: ${PDF_ENGINE:-}
+      CURATOR_IDLE_SECONDS: ${CURATOR_IDLE_SECONDS:-600}
+      BRIEFING_TIME: ${BRIEFING_TIME:-06:00}
+      MEMORY_GIT_REMOTE: ${MEMORY_GIT_REMOTE:-}
+      MEMORY_GIT_TOKEN: ${MEMORY_GIT_TOKEN:-}
+      MEMORY_GIT_USER_NAME: ${MEMORY_GIT_USER_NAME:-}
+      MEMORY_GIT_USER_EMAIL: ${MEMORY_GIT_USER_EMAIL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_CHANNEL_ID: ${LOG_CHANNEL_ID:-}
+      LOG_CHANNEL_LEVEL: ${LOG_CHANNEL_LEVEL:-WARNING}
+      LOG_CHANNEL_HEADER: ${LOG_CHANNEL_HEADER:-}
+      # container paths (they win over anything from outside)
+      MEMORY_DIR: /memory
+      CONVERSATION_FILE: /data/conversation.json
       BRIEFING_STATE_FILE: /data/briefing.json
     volumes:
-      - ./memory:/memory          # repositório git da memória
-      - ./data:/data            # conversa.json e briefing.json
-    stop_grace_period: 40s        # deixa uma curadoria em andamento terminar (o bot espera até 30 s)
+      - memory:/memory   # git repository of the memory
+      - data:/data       # conversation.json and briefing.json
+    stop_grace_period: 40s   # lets a running curation finish (the bot waits up to 30 s)
+
+volumes:
+  memory:
+  data:
