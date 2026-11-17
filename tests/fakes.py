@@ -1,4 +1,4 @@
-"""Duplas de teste compartilhadas pelos testes do bot (sem rede, sem Telegram)."""
+"""Test doubles shared by the bot tests (no network, no Telegram)."""
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -8,10 +8,10 @@ ALLOWED = 42
 
 
 class FakeGateway:
-    """Imita TelegramGateway e registra, em ordem, tudo o que o bot fez."""
+    """Imitates TelegramGateway and records, in order, everything the bot did."""
 
     def __init__(self):
-        self.events = []  # ("typing_on"|"typing_off"|"text"|"file", valor), na ordem
+        self.events = []  # ("typing_on"|"typing_off"|"text"|"file", value), in order
         self.texts, self.files = [], []
         self.data = b"%PDF-1.4"
         self.download_error = None
@@ -58,7 +58,7 @@ class FakeGateway:
     async def register_commands(self, commands, allowed_user_id):
         self.registered = ([c.command for c in commands], allowed_user_id)
 
-    # conveniências para as asserções
+    # conveniences for the assertions
     def sent(self):
         return [t for _, t in self.texts]
 
@@ -66,7 +66,7 @@ class FakeGateway:
         for i, (k, v) in enumerate(self.events):
             if k == kind and (value is None or v == value or (isinstance(v, str) and value in v)):
                 return i
-        raise AssertionError(f"evento {kind!r}/{value!r} não encontrado em {self.events}")
+        raise AssertionError(f"event {kind!r}/{value!r} not found in {self.events}")
 
 
 def make_update(*, text=None, document=None, photo=None, caption="", user_id=ALLOWED, chat_type="private",
@@ -80,7 +80,7 @@ def make_update(*, text=None, document=None, photo=None, caption="", user_id=ALL
 
 
 def make_context():
-    return SimpleNamespace(bot=object())  # o gateway falso ignora o bot
+    return SimpleNamespace(bot=object())  # the fake gateway ignores the bot
 
 
 def pdf_doc(name="voucher.pdf", mime="application/pdf", size=2000, file_id="TGFILE-A"):

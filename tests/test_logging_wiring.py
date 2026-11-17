@@ -1,13 +1,10 @@
-"""Logs da aplicação ligados aos componentes: curadoria, gateway e ciclo de vida do bot."""
+"""Application logs wired into the components: curation, gateway and bot lifecycle."""
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock
 
-import pytest
-
-import applog
 import bot
 import config
 from conversation.log import ConversationLog
@@ -21,7 +18,7 @@ T0 = datetime.fromisoformat("2026-11-17T10:00:00-03:00")
 def make_service(tmp_path, fn):
     history = ConversationLog(tmp_path / "c.json")
     for i in range(6):
-        history.append("usuario", f"segredo-{i}", at=T0.isoformat())
+        history.append("user", f"secret-{i}", at=T0.isoformat())
     return CurationService(history, fn, channel="Telegram", idle_seconds=60, retry_seconds=300)
 
 
@@ -33,8 +30,8 @@ def test_successful_curation_logs_counts_but_never_content(tmp_path, caplog):
     caplog.set_level(logging.INFO)
     service = make_service(tmp_path, lambda m, c, ch: result_with("OK"))
     service.run_now()
-    assert "curadoria concluída: 6 mensagem(ns)" in caplog.text
-    assert "segredo-" not in caplog.text
+    assert "curation finished: 6 message(s)" in caplog.text
+    assert "secret-" not in caplog.text
 
 
 def test_failure_is_an_error_once_per_streak_then_info(tmp_path, caplog):
@@ -43,27 +40,27 @@ def test_failure_is_an_error_once_per_streak_then_info(tmp_path, caplog):
 
     def fn(m, c, ch):
         if state["fail"]:
-            raise RuntimeError("sem rede")
+            raise RuntimeError("no network")
         return result_with("OK")
 
     service = make_service(tmp_path, fn)
     service.run_now(); service.run_now()
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
-    assert len(errors) == 1 and "curadoria falhou" in errors[0].getMessage()
+    assert len(errors) == 1 and "curation failed" in errors[0].getMessage()
     state["fail"] = False
-    service.run_now()  # sucesso encerra a sequência
+    service.run_now()  # success ends the streak
     assert service._failure_logged is False
 
 
 def test_pending_push_warns_once_per_reason(tmp_path, caplog):
     caplog.set_level(logging.INFO)
-    reasons = iter(["Push pendente: sem remote", "Push pendente: sem remote", "Push pendente: rejeitado"])
+    reasons = iter(["Push pending: no remote", "Push pending: no remote", "Push pending: rejected"])
     service = make_service(tmp_path, lambda m, c, ch: result_with(next(reasons)))
     for _ in range(3):
-        service.log.append("usuario", "nova", at=T0.isoformat())
+        service.log.append("user", "new", at=T0.isoformat())
         service.run_now()
     warns = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
-    assert warns == ["push da memória pendente: sem remote", "push da memória pendente: rejeitado"]
+    assert warns == ["memory push pending: no remote", "memory push pending: rejected"]
 
 
 def test_gateway_raw_text_is_not_stripped_of_markdown():
@@ -81,7 +78,7 @@ def test_gateway_raw_text_is_not_stripped_of_markdown():
 def test_main_rejects_an_invalid_log_channel(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "123456:fake-token")
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", "k" * 12)
-    monkeypatch.setattr(config, "LOG_CHANNEL_ID", "canal sem arroba")
+    monkeypatch.setattr(config, "LOG_CHANNEL_ID", "channel without at sign")
     code = bot.main(["--log", str(tmp_path / "c.json"), "--memory-dir", str(tmp_path / "m")],
                     agent=object(), application_factory=lambda *a: MagicMock())
     assert code == 1 and "LOG_CHANNEL_ID" in capsys.readouterr().err

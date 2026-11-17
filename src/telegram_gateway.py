@@ -1,9 +1,9 @@
-"""Tudo o que o bot faz diretamente na API do Telegram, numa classe só.
+"""Everything the bot does directly on the Telegram API, in a single class.
 
-Os handlers (bot.py) tratam de autorização, fila e conversa; esta classe só sabe enviar
-texto, reenviar arquivos, baixar arquivos, mostrar "digitando..." e publicar comandos.
-Assim detalhes da biblioteca (ReplyParameters, ChatAction, limites de tamanho, texto
-simples) ficam aqui, e os testes dos handlers usam um gateway falso.
+The handlers (bot.py) deal with authorization, queueing and conversation; this class only knows
+how to send text, resend files, download files, show "typing..." and publish commands.
+That keeps library details (ReplyParameters, ChatAction, size limits, plain text) here,
+and the handlers' tests use a fake gateway.
 """
 
 import asyncio
@@ -17,13 +17,13 @@ from applog import get_logger
 
 log = get_logger("telegram")
 
-TELEGRAM_LIMIT = 4096  # tamanho máximo de uma mensagem do Telegram
-TYPING_INTERVAL = 4  # o indicador "digitando..." dura ~5s
+TELEGRAM_LIMIT = 4096  # maximum size of a Telegram message
+TYPING_INTERVAL = 4  # the "typing..." indicator lasts ~5s
 
 
 def to_plain(text: str) -> str:
-    """O bot envia texto simples (sem parse_mode): tira a marcação Markdown que os
-    modelos às vezes usam (**negrito**, __negrito__, `código`, títulos com #)."""
+    """The bot sends plain text (no parse_mode): strips the Markdown markup that models
+    sometimes use (**bold**, __bold__, `code`, headings with #)."""
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"`+([^`\n]+)`+", r"\1", text)
@@ -31,7 +31,7 @@ def to_plain(text: str) -> str:
 
 
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
-    """Divide em pedaços de até `limit`, preferindo quebrar em parágrafo, linha ou espaço."""
+    """Split into chunks of up to `limit`, preferring to break at a paragraph, line or space."""
     text = text.strip()
     chunks = []
     while len(text) > limit:
@@ -53,9 +53,9 @@ class TelegramGateway:
         self.bot = bot
 
     async def send_text(self, chat_id: int | str, text: str, *, raw: bool = False) -> None:
-        """Envia texto simples, dividido no limite do Telegram. `raw=True` não mexe no texto
-        (usado nos logs, onde `**` ou `#` podem ser parte do conteúdo)."""
-        for chunk in split_message(text if raw else to_plain(text)) or ["(sem resposta)"]:
+        """Send plain text, split at the Telegram limit. `raw=True` leaves the text untouched
+        (used for logs, where `**` or `#` may be part of the content)."""
+        for chunk in split_message(text if raw else to_plain(text)) or ["(no reply)"]:
             await self.bot.send_message(chat_id=chat_id, text=chunk)
 
     @staticmethod
@@ -64,7 +64,7 @@ class TelegramGateway:
                                      for row in rows])
 
     async def send_buttons(self, chat_id: int, text: str, rows: list) -> int:
-        """Mensagem com botões (lista de linhas de (rótulo, callback_data)). Devolve o message_id."""
+        """Message with buttons (list of rows of (label, callback_data)). Return the message_id."""
         message = await self.bot.send_message(chat_id=chat_id, text=text, reply_markup=self._keyboard(rows))
         return message.message_id
 
@@ -73,11 +73,11 @@ class TelegramGateway:
                                          reply_markup=self._keyboard(rows) if rows else None)
 
     async def answer_callback(self, callback_id: str, text: str = "") -> None:
-        """Responde ao toque (some o "carregando" do botão; o texto vira um aviso rápido)."""
+        """Answer the tap (the button's "loading" goes away; the text becomes a quick notice)."""
         await self.bot.answer_callback_query(callback_id, text=text or None)
 
     async def send_file(self, chat_id: int, attachment) -> None:
-        """Reenvia um arquivo pelo file_id, citando a mensagem original quando ela existir."""
+        """Resend a file by its file_id, quoting the original message when it exists."""
         reply_to = ReplyParameters(message_id=attachment.message_id, allow_sending_without_reply=True)
         if attachment.kind == "photo":
             await self.bot.send_photo(chat_id=chat_id, photo=attachment.file_id, reply_parameters=reply_to)
@@ -90,7 +90,7 @@ class TelegramGateway:
 
     @asynccontextmanager
     async def typing(self, chat_id: int):
-        """Mantém o "digitando..." ligado enquanto o bloco roda (inclusive esperando a vez)."""
+        """Keep "typing..." on while the block runs (including while waiting for its turn)."""
         task = asyncio.create_task(self._typing_loop(chat_id))
         try:
             yield
@@ -103,15 +103,15 @@ class TelegramGateway:
         while True:
             try:
                 await self.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-            except Exception:  # noqa: BLE001 - o indicador é um luxo: nunca derruba o fluxo
+            except Exception:  # noqa: BLE001 - the indicator is a luxury: it never breaks the flow
                 pass
             await asyncio.sleep(TYPING_INTERVAL)
 
     async def register_commands(self, commands: list, allowed_user_id: int | None) -> None:
-        """Publica a lista de comandos (menu "/" do Telegram). Com usuário autorizado, só
-        ele vê o menu; sem ele, vale o escopo padrão. Falha aqui não impede o bot de rodar."""
+        """Publish the command list (Telegram's "/" menu). With an authorized user, only they
+        see the menu; without one, the default scope applies. A failure here does not stop the bot."""
         scope = BotCommandScopeChat(chat_id=allowed_user_id) if allowed_user_id else None
         try:
             await self.bot.set_my_commands(commands, scope=scope)
         except Exception as exc:  # noqa: BLE001
-            log.warning("não consegui registrar os comandos no Telegram", exc_info=exc)
+            log.warning("could not register the commands on Telegram", exc_info=exc)

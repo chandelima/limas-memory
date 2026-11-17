@@ -19,7 +19,7 @@ def run(coro):
 
 @pytest.fixture(autouse=True)
 def clean_logging():
-    """Cada teste começa sem handlers do app e deixa tudo como encontrou."""
+    """Each test starts without app handlers and leaves everything as it found it."""
     root, app = logging.getLogger(), logging.getLogger("limas")
     before_root, before_app, level = list(root.handlers), list(app.handlers), root.level
     yield
@@ -31,26 +31,26 @@ def clean_logging():
 @pytest.fixture
 def secrets(monkeypatch):
     monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", BOT_TOKEN)
-    monkeypatch.setattr(config, "OPENROUTER_API_KEY", "or-minha-chave-secreta-123")
-    monkeypatch.setattr(config, "MEMORY_GIT_TOKEN", "meu-token-do-git-1234")
+    monkeypatch.setattr(config, "OPENROUTER_API_KEY", "or-my-secret-key-123")
+    monkeypatch.setattr(config, "MEMORY_GIT_TOKEN", "my-git-token-1234")
 
 
-def record(msg="evento", level=logging.WARNING, name="limas.bot", exc=None, channel=False):
+def record(msg="event", level=logging.WARNING, name="limas.bot", exc=None, channel=False):
     rec = logging.LogRecord(name, level, __file__, 1, msg, (), (type(exc), exc, None) if exc else None)
     if channel:
         rec.channel = True
     return rec
 
 
-# ---- mascaramento de segredos ---------------------------------------------------------------
+# ---- masking secrets ----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        f"erro em https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
-        "usando sk-abcdefghijklmnopqrstuvwxyz123456 no header",
-        "push com ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+        f"error at https://api.telegram.org/bot{BOT_TOKEN}/getUpdates",
+        "using sk-abcdefghijklmnopqrstuvwxyz123456 in the header",
+        "push with ghp_abcdefghijklmnopqrstuvwxyz0123456789",
         "Authorization: Basic eC1hY2Nlc3MtdG9rZW46c2VncmVkbw==",
         "Authorization: Bearer abcdef1234567890",
         "api_key = abcdef1234567890XYZ",
@@ -62,41 +62,41 @@ def test_redact_masks_common_secret_shapes(text):
 
 
 def test_redact_masks_the_configured_secrets_wherever_they_appear(secrets):
-    text = "falha: or-minha-chave-secreta-123 e meu-token-do-git-1234 em " + BOT_TOKEN
+    text = "failure: or-my-secret-key-123 and my-git-token-1234 in " + BOT_TOKEN
     out = redact(text)
-    assert out == "falha: *** e *** em ***"
-    assert redact("texto normal sem segredo") == "texto normal sem segredo"
-    assert applog.known_secrets() == [BOT_TOKEN, "or-minha-chave-secreta-123", "meu-token-do-git-1234"]
+    assert out == "failure: *** and *** in ***"
+    assert redact("normal text without a secret") == "normal text without a secret"
+    assert applog.known_secrets() == [BOT_TOKEN, "or-my-secret-key-123", "my-git-token-1234"]
 
 
 def test_formatter_masks_secrets_inside_exception_tracebacks(secrets):
     try:
-        raise RuntimeError(f"URL inválida bot{BOT_TOKEN}")
+        raise RuntimeError(f"Invalid URL bot{BOT_TOKEN}")
     except RuntimeError:
         import sys
 
-        rec = logging.LogRecord("limas.x", logging.ERROR, __file__, 1, "falhou", (), sys.exc_info())
+        rec = logging.LogRecord("limas.x", logging.ERROR, __file__, 1, "failed", (), sys.exc_info())
     text = RedactingFormatter("%(levelname)s %(message)s").format(rec)
-    assert "falhou" in text and "Traceback" in text and BOT_TOKEN not in text and "***" in text
+    assert "failed" in text and "Traceback" in text and BOT_TOKEN not in text and "***" in text
 
 
-# ---- configuração ----------------------------------------------------------------------------
+# ---- configuration -------------------------------------------------------------------------------
 
 
 def test_parse_level_names_numbers_and_fallback():
     assert parse_level("debug", logging.INFO) == logging.DEBUG and parse_level(" Warning ", 0) == logging.WARNING
-    assert parse_level(40, 0) == 40 and parse_level("nenhum", logging.INFO) == logging.INFO
+    assert parse_level(40, 0) == 40 and parse_level("none", logging.INFO) == logging.INFO
 
 
 @pytest.mark.parametrize("value,expected", [("", None), ("  ", None), ("-1001234567890", -1001234567890),
-                                            ("123", 123), ("@meucanal", "@meucanal")])
+                                            ("123", 123), ("@mychannel", "@mychannel")])
 def test_parse_channel_id(value, expected):
     assert parse_channel_id(value) == expected
 
 
-@pytest.mark.parametrize("bad", ["meucanal", "@", "-100abc", "https://t.me/x"])
+@pytest.mark.parametrize("bad", ["mychannel", "@", "-100abc", "https://t.me/x"])
 def test_parse_channel_id_rejects_bad_values(bad):
-    with pytest.raises(ValueError, match="LOG_CHANNEL_ID inválido"):
+    with pytest.raises(ValueError, match="invalid LOG_CHANNEL_ID"):
         parse_channel_id(bad)
 
 
@@ -104,20 +104,20 @@ def test_configure_logging_is_idempotent_and_keeps_libraries_quiet(capsys):
     configure_logging(console_level="INFO")
     configure_logging(console_level="DEBUG")
     marked = [h for h in logging.getLogger().handlers if getattr(h, "_limas_console", False)]
-    assert len(marked) == 1  # chamar de novo troca o handler em vez de duplicar
+    assert len(marked) == 1  # calling again replaces the handler instead of duplicating it
     for name in ("httpx", "httpcore", "telegram"):
-        assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING  # a URL do httpx tem o token
-    get_logger("teste").info("olá do app")
-    get_logger("teste").debug("detalhe")
+        assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING  # the httpx URL carries the token
+    get_logger("test").info("hello from the app")
+    get_logger("test").debug("detail")
     logging.getLogger("httpx").info("POST https://api.telegram.org/botX/getUpdates")
     err = capsys.readouterr().err
-    assert "INFO    limas.teste: olá do app" in err and "DETALHE".lower() in err.lower()
+    assert "INFO    limas.test: hello from the app" in err and "detail" in err.lower()
     assert "getUpdates" not in err
 
 
 def test_console_masks_secrets(capsys, secrets):
     configure_logging()
-    get_logger("bot").error("falha com %s", BOT_TOKEN)
+    get_logger("bot").error("failure with %s", BOT_TOKEN)
     err = capsys.readouterr().err
     assert BOT_TOKEN not in err and "***" in err
 
@@ -127,48 +127,48 @@ def test_channel_handler_is_only_created_when_the_channel_is_enabled():
     handler = configure_logging(channel=True, channel_level="ERROR")
     assert isinstance(handler, ChannelHandler) and handler.min_level == logging.ERROR
     assert sum(isinstance(h, ChannelHandler) for h in logging.getLogger("limas").handlers) == 1
-    assert configure_logging(channel=True) is not handler  # reconfigurar substitui
+    assert configure_logging(channel=True) is not handler  # reconfiguring replaces it
     assert sum(isinstance(h, ChannelHandler) for h in logging.getLogger("limas").handlers) == 1
 
 
-# ---- fila do canal -----------------------------------------------------------------------------
+# ---- channel queue --------------------------------------------------------------------------------
 
 
 def test_handler_queues_warnings_but_not_info_unless_marked_for_the_channel():
     handler = ChannelHandler(level=logging.WARNING)
-    for rec in (record("info comum", logging.INFO), record("aviso", logging.WARNING), record("erro", logging.ERROR),
-                record("bot iniciado", logging.INFO, channel=True)):
+    for rec in (record("plain info", logging.INFO), record("warning", logging.WARNING), record("error", logging.ERROR),
+                record("bot started", logging.INFO, channel=True)):
         handler.emit(rec)
     lines = []
     while not handler.queue.empty():
         lines.append(handler.queue.get_nowait())
-    assert [ln.split(": ", 1)[1] for ln in lines] == ["aviso", "erro", "bot iniciado"]
-    assert lines[0].split()[1] == "#WARNING" and " bot: " in lines[0]  # hora, nível e origem sem o prefixo limas.
+    assert [ln.split(": ", 1)[1] for ln in lines] == ["warning", "error", "bot started"]
+    assert lines[0].split()[1] == "#WARNING" and " bot: " in lines[0]  # time, level and origin without the limas. prefix
 
 
 def test_channel_line_has_error_type_and_message_but_no_traceback_and_a_single_line(secrets):
-    err = ValueError(f"deu ruim\ncom {BOT_TOKEN}")
-    line = ChannelHandler.channel_line(record("não consegui responder", logging.ERROR, exc=err))
-    assert "não consegui responder [ValueError: deu ruim com ***]" in line
+    err = ValueError(f"went wrong\nwith {BOT_TOKEN}")
+    line = ChannelHandler.channel_line(record("could not answer", logging.ERROR, exc=err))
+    assert "could not answer [ValueError: went wrong with ***]" in line
     assert "\n" not in line and "Traceback" not in line and BOT_TOKEN not in line
 
 
 def test_handler_ignores_the_shippers_own_logs_to_avoid_loops():
     handler = ChannelHandler()
-    handler.emit(record("falha ao enviar", logging.WARNING, name=applog.SHIP_NAME))
-    handler.emit(record("outra", logging.ERROR, name=applog.SHIP_NAME + ".x"))
+    handler.emit(record("failed to send", logging.WARNING, name=applog.SHIP_NAME))
+    handler.emit(record("another", logging.ERROR, name=applog.SHIP_NAME + ".x"))
     assert handler.queue.empty()
 
 
 def test_full_queue_drops_the_oldest_and_counts():
     handler = ChannelHandler(maxsize=3)
     for i in range(5):
-        handler.emit(record(f"evento {i}"))
+        handler.emit(record(f"event {i}"))
     lines = [handler.queue.get_nowait().split(": ", 1)[1] for _ in range(3)]
-    assert lines == ["evento 2", "evento 3", "evento 4"] and handler.dropped == 2
+    assert lines == ["event 2", "event 3", "event 4"] and handler.dropped == 2
 
 
-# ---- empacotar e juntar linhas ---------------------------------------------------------------------
+# ---- packing and joining lines ------------------------------------------------------------------------
 
 
 def test_pack_respects_the_limit_and_cuts_huge_lines():
@@ -180,14 +180,14 @@ def test_pack_respects_the_limit_and_cuts_huge_lines():
 
 
 def test_collapse_merges_consecutive_equal_lines_ignoring_the_time():
-    lines = ["10:00:01 WARNING bot: usuário não autorizado id=9", "10:00:02 WARNING bot: usuário não autorizado id=9",
-             "10:00:03 WARNING bot: usuário não autorizado id=9", "10:00:04 ERROR bot: outra coisa",
-             "10:00:05 WARNING bot: usuário não autorizado id=9"]
-    assert collapse(lines) == ["10:00:01 WARNING bot: usuário não autorizado id=9 (x3)",
-                               "10:00:04 ERROR bot: outra coisa", "10:00:05 WARNING bot: usuário não autorizado id=9"]
+    lines = ["10:00:01 WARNING bot: unauthorized user id=9", "10:00:02 WARNING bot: unauthorized user id=9",
+             "10:00:03 WARNING bot: unauthorized user id=9", "10:00:04 ERROR bot: something else",
+             "10:00:05 WARNING bot: unauthorized user id=9"]
+    assert collapse(lines) == ["10:00:01 WARNING bot: unauthorized user id=9 (x3)",
+                               "10:00:04 ERROR bot: something else", "10:00:05 WARNING bot: unauthorized user id=9"]
 
 
-# ---- envio em lote ----------------------------------------------------------------------------------
+# ---- batch sending -----------------------------------------------------------------------------------------
 
 
 class Sink:
@@ -197,7 +197,7 @@ class Sink:
     async def __call__(self, text):
         if self.fail_times:
             self.fail_times -= 1
-            raise RuntimeError("telegram fora")
+            raise RuntimeError("telegram is down")
         self.sent.append(text)
 
 
@@ -210,45 +210,45 @@ def shipper(handler, sink, **kw):
 def test_flush_sends_one_batched_message_without_header_by_default_and_collapses_repeats():
     handler, sink = ChannelHandler(), Sink()
     for _ in range(3):
-        handler.emit(record("mesma falha"))
-    handler.emit(record("outra falha", logging.ERROR))
+        handler.emit(record("same failure"))
+    handler.emit(record("another failure", logging.ERROR))
     assert run(shipper(handler, sink).flush()) == 1
-    assert len(sink.sent) == 1 and sink.sent[0].split()[0][0].isdigit()  # sem cabeçalho: começa na hora
-    assert "mesma falha (x3)" in sink.sent[0] and "#ERROR bot: outra falha" in sink.sent[0]
-    assert run(shipper(handler, sink).flush()) == 0  # fila vazia: nada a enviar
+    assert len(sink.sent) == 1 and sink.sent[0].split()[0][0].isdigit()  # no header: starts with the time
+    assert "same failure (x3)" in sink.sent[0] and "#ERROR bot: another failure" in sink.sent[0]
+    assert run(shipper(handler, sink).flush()) == 0  # empty queue: nothing to send
 
 
 def test_flush_reports_dropped_lines_and_splits_long_batches():
     handler, sink = ChannelHandler(maxsize=2), Sink()
     for i in range(5):
-        handler.emit(record(f"evento {i}"))
+        handler.emit(record(f"event {i}"))
     assert run(shipper(handler, sink).flush()) == 1
-    assert "(3 linhas de log descartadas por excesso)" in sink.sent[0] and handler.dropped == 0
+    assert "(3 log lines dropped due to overflow)" in sink.sent[0] and handler.dropped == 0
     big, sink2 = ChannelHandler(maxsize=1000), Sink()
     for i in range(300):
-        big.emit(record(f"evento número {i} " + "x" * 30))
+        big.emit(record(f"event number {i} " + "x" * 30))
     assert run(shipper(big, sink2).flush()) >= 2 and all(len(m) <= applog.CHANNEL_LIMIT for m in sink2.sent)
 
 
 def test_a_failed_send_keeps_the_lines_and_retries_on_the_next_flush(caplog):
     handler, sink = ChannelHandler(), Sink(fail_times=1)
-    handler.emit(record("importante"))
+    handler.emit(record("important"))
     ship = shipper(handler, sink)
     with caplog.at_level(logging.WARNING, logger=applog.SHIP_NAME):
         assert run(ship.flush()) == 0
-    assert sink.sent == [] and "não consegui enviar o log ao canal" in caplog.text
-    handler.emit(record("depois"))
-    assert run(ship.flush()) == 1  # a que falhou vai junto com a nova
-    assert "importante" in sink.sent[0] and "depois" in sink.sent[0]
+    assert sink.sent == [] and "could not send the log to the channel" in caplog.text
+    handler.emit(record("later"))
+    assert run(ship.flush()) == 1  # the one that failed goes along with the new one
+    assert "important" in sink.sent[0] and "later" in sink.sent[0]
 
 
 def test_failure_logs_do_not_re_enter_the_queue():
     handler, sink = ChannelHandler(), Sink(fail_times=5)
     logging.getLogger("limas").addHandler(handler)
     try:
-        handler.emit(record("importante"))
+        handler.emit(record("important"))
         ship = shipper(handler, sink)
-        run(ship.flush())  # falha e loga em limas.logship, que o handler ignora
+        run(ship.flush())  # fails and logs to limas.logship, which the handler ignores
         assert handler.queue.empty()
     finally:
         logging.getLogger("limas").removeHandler(handler)
@@ -258,9 +258,9 @@ def test_pending_lines_kept_after_failures_are_bounded():
     handler, sink = ChannelHandler(maxsize=1000), Sink(fail_times=99)
     ship = shipper(handler, sink, keep_on_failure=5)
     for i in range(50):
-        handler.emit(record(f"evento {i}"))
+        handler.emit(record(f"event {i}"))
     run(ship.flush())
-    assert len(ship._pending) == 5 and ship._pending[-1].endswith("evento 49")
+    assert len(ship._pending) == 5 and ship._pending[-1].endswith("event 49")
 
 
 def test_rate_limit_waits_between_messages(monkeypatch):
@@ -272,10 +272,10 @@ def test_rate_limit_waits_between_messages(monkeypatch):
 
     monkeypatch.setattr(applog.asyncio, "sleep", fake_sleep)
     for i in range(300):
-        handler.emit(record(f"evento número {i} " + "x" * 30))
+        handler.emit(record(f"event number {i} " + "x" * 30))
     ship = LogShipper(handler, sink, min_interval=3)
     assert run(ship.flush()) >= 2
-    assert waits and all(0 < w <= 3 for w in waits)  # respeitou o intervalo entre as mensagens
+    assert waits and all(0 < w <= 3 for w in waits)  # it respected the interval between messages
 
 
 def test_run_flushes_periodically_and_once_more_on_stop():
@@ -284,18 +284,18 @@ def test_run_flushes_periodically_and_once_more_on_stop():
     async def scenario():
         stop = asyncio.Event()
         task = asyncio.create_task(shipper(handler, sink).run(stop))
-        handler.emit(record("primeiro"))
-        await asyncio.sleep(0.05)  # o ciclo de flush envia
-        handler.emit(record("na despedida", logging.ERROR))
+        handler.emit(record("first"))
+        await asyncio.sleep(0.05)  # the flush cycle sends
+        handler.emit(record("at farewell", logging.ERROR))
         stop.set()
         await task
 
     run(scenario())
-    assert len(sink.sent) == 2 and "primeiro" in sink.sent[0] and "na despedida" in sink.sent[1]
+    assert len(sink.sent) == 2 and "first" in sink.sent[0] and "at farewell" in sink.sent[1]
 
 
 def test_optional_header_identifies_the_app_in_a_shared_channel():
     handler, sink = ChannelHandler(), Sink()
-    handler.emit(record("falha"))
-    run(shipper(handler, sink, header="[meu-app]").flush())
-    assert sink.sent[0].startswith("[meu-app]" + chr(10))
+    handler.emit(record("failure"))
+    run(shipper(handler, sink, header="[my-app]").flush())
+    assert sink.sent[0].startswith("[my-app]" + chr(10))

@@ -24,16 +24,16 @@ def att(kind="document"):
                       filename="v.pdf", mime="application/pdf", size=1, caption="", received_at="2026-11-17T10:00:00-03:00")
 
 
-# ---- texto ---------------------------------------------------------------------------
+# ---- text ----------------------------------------------------------------------------
 
 
 def test_to_plain_strips_markdown_markers_only():
-    text = "## Título\n**Criados:** `a.md` e __b__\n- item\n2 * 3 * 4"
-    assert to_plain(text) == "Título\nCriados: a.md e b\n- item\n2 * 3 * 4"
+    text = "## Title\n**Created:** `a.md` and __b__\n- item\n2 * 3 * 4"
+    assert to_plain(text) == "Title\nCreated: a.md and b\n- item\n2 * 3 * 4"
 
 
 def test_split_short_and_empty():
-    assert split_message("curta") == ["curta"] and split_message("   ") == []
+    assert split_message("short") == ["short"] and split_message("   ") == []
 
 
 def test_split_respects_limit_and_prefers_paragraphs():
@@ -44,16 +44,16 @@ def test_split_respects_limit_and_prefers_paragraphs():
 
 def test_split_hard_cut_without_separator_and_keeps_content():
     assert [len(c) for c in split_message("x" * 250, limit=100)] == [100, 100, 50]
-    words = " ".join(["palavra"] * 300)
+    words = " ".join(["word"] * 300)
     pieces = split_message(words, limit=100)
     assert all(len(p) <= 100 for p in pieces) and " ".join(pieces).split() == words.split()
 
 
 def test_send_text_is_plain_and_split():
     bot = fake_bot()
-    run(TelegramGateway(bot).send_text(42, "Você toma **chá**. " + "p " * 3000))
+    run(TelegramGateway(bot).send_text(42, "You drink **tea**. " + "p " * 3000))
     texts = [c.kwargs["text"] for c in bot.send_message.await_args_list]
-    assert texts[0].startswith("Você toma chá.") and "**" not in texts[0]
+    assert texts[0].startswith("You drink tea.") and "**" not in texts[0]
     assert len(texts) > 1 and all(len(t) <= tg.TELEGRAM_LIMIT for t in texts)
     assert all(c.kwargs["chat_id"] == 42 for c in bot.send_message.await_args_list)
 
@@ -61,10 +61,10 @@ def test_send_text_is_plain_and_split():
 def test_send_text_with_empty_text_still_sends_something():
     bot = fake_bot()
     run(TelegramGateway(bot).send_text(42, "   "))
-    assert bot.send_message.await_args.kwargs["text"] == "(sem resposta)"
+    assert bot.send_message.await_args.kwargs["text"] == "(no reply)"
 
 
-# ---- arquivos ------------------------------------------------------------------------
+# ---- files ---------------------------------------------------------------------------
 
 
 def test_send_file_uses_file_id_and_quotes_the_original_message():
@@ -85,7 +85,7 @@ def test_download_returns_bytes():
     bot.get_file.assert_awaited_once_with("FILEID")
 
 
-# ---- digitando -----------------------------------------------------------------------
+# ---- typing --------------------------------------------------------------------------
 
 
 def test_typing_shows_immediately_repeats_and_stops_on_exit(monkeypatch):
@@ -100,33 +100,33 @@ def test_typing_shows_immediately_repeats_and_stops_on_exit(monkeypatch):
         return calls_inside
 
     inside = run(scenario())
-    assert inside >= 3  # imediato e repetido
-    assert bot.send_chat_action.await_count == inside  # parou ao sair do bloco
+    assert inside >= 3  # immediate and repeated
+    assert bot.send_chat_action.await_count == inside  # it stopped when leaving the block
     assert bot.send_chat_action.await_args.kwargs == {"chat_id": 42, "action": ChatAction.TYPING}
 
 
 def test_typing_survives_api_errors_and_block_exceptions(monkeypatch):
     monkeypatch.setattr(tg, "TYPING_INTERVAL", 0.01)
     bot = fake_bot()
-    bot.send_chat_action.side_effect = RuntimeError("rede")
+    bot.send_chat_action.side_effect = RuntimeError("network")
 
     async def scenario():
         async with TelegramGateway(bot).typing(42):
-            await asyncio.sleep(0.03)  # o erro no indicador não derruba o bloco
-            raise ValueError("erro do bloco")
+            await asyncio.sleep(0.03)  # an error in the indicator does not break the block
+            raise ValueError("block error")
 
-    with pytest.raises(ValueError, match="erro do bloco"):
+    with pytest.raises(ValueError, match="block error"):
         run(scenario())
     assert bot.send_chat_action.await_count >= 1
 
 
-# ---- comandos ------------------------------------------------------------------------
+# ---- commands ------------------------------------------------------------------------
 
 
 def test_register_commands_scope_for_allowed_user_or_default():
     from telegram import BotCommand
 
-    commands = [BotCommand("status", "Estado"), BotCommand("curate", "Processa")]
+    commands = [BotCommand("status", "State"), BotCommand("curate", "Process")]
     bot = fake_bot()
     gw = TelegramGateway(bot)
     run(gw.register_commands(commands, 42))
@@ -136,19 +136,14 @@ def test_register_commands_scope_for_allowed_user_or_default():
     assert bot.set_my_commands.await_args.kwargs["scope"] is None
 
 
-def test_register_commands_failure_does_not_raise(capsys):
+def test_register_commands_failure_does_not_raise(caplog):
     bot = fake_bot()
-    bot.set_my_commands.side_effect = RuntimeError("sem rede")
+    bot.set_my_commands.side_effect = RuntimeError("no network")
     run(TelegramGateway(bot).register_commands([], 42))
-    assert "não consegui registrar os comandos" in capsys.readouterr().err
+    assert "could not register the commands" in caplog.text
 
 
 def test_buttons_are_sent_edited_and_answered_through_the_bot():
-    import asyncio
-    from types import SimpleNamespace
-
-    from telegram_gateway import TelegramGateway
-
     calls = []
 
     class B:
@@ -163,10 +158,10 @@ def test_buttons_are_sent_edited_and_answered_through_the_bot():
             calls.append(("answer", cid, text))
 
     gw = TelegramGateway(B())
-    rows = [[("⭕ Tarefa", "tk:a1b2:20261118:h:")]]
-    assert asyncio.run(gw.send_buttons(1, "Painel", rows)) == 77
-    asyncio.run(gw.edit_buttons(1, 77, "Painel", rows))
-    asyncio.run(gw.answer_callback("cb", "feito"))
+    rows = [[("⭕ Task", "tk:a1b2:20261118:t:")]]
+    assert asyncio.run(gw.send_buttons(1, "Panel", rows)) == 77
+    asyncio.run(gw.edit_buttons(1, 77, "Panel", rows))
+    asyncio.run(gw.answer_callback("cb", "done"))
     keyboard = calls[0][1]["reply_markup"].inline_keyboard
-    assert keyboard[0][0].text == "⭕ Tarefa" and keyboard[0][0].callback_data == "tk:a1b2:20261118:h:"
-    assert calls[1][0] == "edit" and calls[2] == ("answer", "cb", "feito")
+    assert keyboard[0][0].text == "⭕ Task" and keyboard[0][0].callback_data == "tk:a1b2:20261118:t:"
+    assert calls[1][0] == "edit" and calls[2] == ("answer", "cb", "done")

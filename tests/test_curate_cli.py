@@ -1,5 +1,3 @@
-import subprocess
-
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage
@@ -10,7 +8,7 @@ from curator.tools import build_tools
 from storage.git import MemoryGit
 from storage.store import MemoryStore
 
-DOC = "---\ndescription: Preferências de café\n---\n# Café\nSem açúcar.\n"
+DOC = "---\ndescription: Coffee preferences\n---\n# Coffee\nNo sugar.\n"
 
 
 class ScriptedModel(FakeMessagesListChatModel):
@@ -23,18 +21,18 @@ def tool_call(name, args, id):
 
 
 def test_parse_conversation_roles_and_continuations():
-    text = "usuario: oi\ncontinua aqui\nassistente: olá\nUSER: tchau\n"
+    text = "user: hi\ncontinues here\nassistant: hello\nUSER: bye\n"
     msgs = cli.parse_conversation(text)
     assert [(m.role, m.text) for m in msgs] == [
-        ("usuario", "oi\ncontinua aqui"),
-        ("assistente", "olá"),
-        ("usuario", "tchau"),
+        ("user", "hi\ncontinues here"),
+        ("assistant", "hello"),
+        ("user", "bye"),
     ]
 
 
 def test_parse_conversation_without_prefixes_is_one_user_message():
-    msgs = cli.parse_conversation("Prefiro café\nsem açúcar\n\n")
-    assert [(m.role, m.text) for m in msgs] == [("usuario", "Prefiro café\nsem açúcar")]
+    msgs = cli.parse_conversation("I prefer coffee\nwithout sugar\n\n")
+    assert [(m.role, m.text) for m in msgs] == [("user", "I prefer coffee\nwithout sugar")]
 
 
 def test_parse_conversation_empty():
@@ -51,15 +49,15 @@ def test_example_scenarios_are_parseable():
 
 
 def test_main_runs_and_prints_report_and_diff(tmp_path, capsys):
-    mem = tmp_path / "memoria"
+    mem = tmp_path / "memory"
     conv = tmp_path / "conv.txt"
-    conv.write_text("usuario: Tomo café sem açúcar\n", encoding="utf-8")
+    conv.write_text("user: I drink coffee without sugar\n", encoding="utf-8")
     store, git = MemoryStore(mem), MemoryGit(mem)
     script = [
-        tool_call("write_memory", {"path": "preferencias/cafe.md", "content": DOC}, "1"),
+        tool_call("write_memory", {"path": "preferences/coffee.md", "content": DOC}, "1"),
         tool_call("update_index", {}, "2"),
-        tool_call("commit_memory", {"message": "docs: registra café"}, "3"),
-        AIMessage(content="Criado: preferencias/cafe.md."),
+        tool_call("commit_memory", {"message": "docs: record coffee"}, "3"),
+        AIMessage(content="Created: preferences/coffee.md."),
     ]
     agent = build_curator(llm=ScriptedModel(responses=script), tools=build_tools(store, git))
 
@@ -68,25 +66,25 @@ def test_main_runs_and_prints_report_and_diff(tmp_path, capsys):
 
     assert code == 0
     assert "write_memory -> update_index -> commit_memory" in out
-    assert "Criado: preferencias/cafe.md." in out
-    assert "+++ b/preferencias/cafe.md" in out and "docs: registra café" in out
+    assert "Created: preferences/coffee.md." in out
+    assert "+++ b/preferences/coffee.md" in out and "docs: record coffee" in out
 
 
 def test_main_nothing_saved_reports_no_commit(tmp_path, capsys):
-    mem = tmp_path / "memoria"
+    mem = tmp_path / "memory"
     conv = tmp_path / "conv.txt"
-    conv.write_text("usuario: bom dia\n", encoding="utf-8")
+    conv.write_text("user: good morning\n", encoding="utf-8")
     store, git = MemoryStore(mem), MemoryGit(mem)
     agent = build_curator(
-        llm=ScriptedModel(responses=[AIMessage(content="Nada a gravar.")]),
+        llm=ScriptedModel(responses=[AIMessage(content="Nothing to write.")]),
         tools=build_tools(store, git),
     )
     assert cli.main([str(conv), "--memory-dir", str(mem)], agent=agent) == 0
-    assert "(nenhum commit novo)" in capsys.readouterr().out
+    assert "(no new commit)" in capsys.readouterr().out
 
 
 def test_main_empty_conversation_returns_2(tmp_path, capsys):
-    conv = tmp_path / "vazia.txt"
+    conv = tmp_path / "empty.txt"
     conv.write_text("\n", encoding="utf-8")
     assert cli.main([str(conv), "--memory-dir", str(tmp_path / "m")]) == 2
 
@@ -96,7 +94,7 @@ def test_main_without_api_key_returns_1(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", "")
     conv = tmp_path / "conv.txt"
-    conv.write_text("usuario: oi\n", encoding="utf-8")
+    conv.write_text("user: hi\n", encoding="utf-8")
     assert cli.main([str(conv), "--memory-dir", str(tmp_path / "m")]) == 1
     assert "OPENROUTER_API_KEY" in capsys.readouterr().err
 
@@ -107,28 +105,28 @@ def test_describe_args_truncates_long_values():
 
 
 def test_verbose_shows_each_tool_and_result(tmp_path, capsys):
-    mem = tmp_path / "memoria"
+    mem = tmp_path / "memory"
     conv = tmp_path / "conv.txt"
-    conv.write_text("usuario: oi\n", encoding="utf-8")
+    conv.write_text("user: hi\n", encoding="utf-8")
     store, git = MemoryStore(mem), MemoryGit(mem)
     script = [
-        tool_call("write_memory", {"path": "a.md", "content": "sem frontmatter"}, "1"),
-        AIMessage(content="Falhou."),
+        tool_call("write_memory", {"path": "a.md", "content": "no frontmatter"}, "1"),
+        AIMessage(content="Failed."),
     ]
     agent = build_curator(llm=ScriptedModel(responses=script), tools=build_tools(store, git))
     cli.main([str(conv), "--memory-dir", str(mem), "--verbose"], agent=agent)
     out = capsys.readouterr().out
-    assert "== Detalhe das tools ==" in out
-    assert "1. write_memory(path='a.md'" in out and "-> ERRO" in out
+    assert "== Tool details ==" in out
+    assert "1. write_memory(path='a.md'" in out and "-> ERROR" in out
 
 
 def test_default_output_has_no_tool_detail(tmp_path, capsys):
-    mem = tmp_path / "memoria"
+    mem = tmp_path / "memory"
     conv = tmp_path / "conv.txt"
-    conv.write_text("usuario: oi\n", encoding="utf-8")
+    conv.write_text("user: hi\n", encoding="utf-8")
     store, git = MemoryStore(mem), MemoryGit(mem)
     agent = build_curator(
-        llm=ScriptedModel(responses=[AIMessage(content="Nada.")]), tools=build_tools(store, git)
+        llm=ScriptedModel(responses=[AIMessage(content="Nothing.")]), tools=build_tools(store, git)
     )
     cli.main([str(conv), "--memory-dir", str(mem)], agent=agent)
-    assert "Detalhe das tools" not in capsys.readouterr().out
+    assert "Tool details" not in capsys.readouterr().out

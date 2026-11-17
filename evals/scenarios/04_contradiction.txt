@@ -1,3 +1,3 @@
-usuario: Na real, eu nem gosto de café. Nunca tomo, prefiro chá.
-assistente: Entendi. Antes você tinha mencionado que tomava café sem açúcar.
-usuario: Não sei, acho que falei isso por falar. Não tenho certeza.
+user: Actually, I don't even like coffee. I never drink it, I prefer tea.
+assistant: I see. Earlier you had mentioned that you drank coffee without sugar.
+user: I don't know, I think I just said that for the sake of saying it. I'm not sure.

@@ -1,3 +1,3 @@
-usuario: Estou pensando em talvez me mudar para Lisboa ano que vem, mas ainda não decidi nada. Pode ser que eu fique aqui mesmo.
-assistente: Faz sentido pensar com calma.
-usuario: Acho que o custo de vida lá deve ser menor, mas é só um palpite meu, não pesquisei.
+user: I'm thinking about maybe moving to Lisbon next year, but I haven't decided anything yet. I might just stay here.
+assistant: It makes sense to think it through calmly.
+user: I think the cost of living there should be lower, but it's just a guess of mine, I haven't researched it.

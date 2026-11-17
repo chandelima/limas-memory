@@ -1,5 +1,5 @@
-usuario: Bom dia! Tudo bem?
-assistente: Bom dia! Tudo bem por aqui, e com você?
-usuario: Tudo certo. Hoje tá bem nublado, né?
-assistente: Sim, parece que vai chover mais tarde.
-usuario: Valeu, era só isso. Até mais!
+user: Good morning! How are you?
+assistant: Good morning! All good here, and you?
+user: All good. It's pretty cloudy today, isn't it?
+assistant: Yes, it looks like rain later.
+user: Thanks, that was all. See you!

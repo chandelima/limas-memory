@@ -108,8 +108,7 @@ def test_format_input_includes_current_datetime():
 def test_prompt_guides_dates_quotes_and_no_process_notes():
     prompt = load_system_prompt()
     assert "absolute dates" in prompt and "CURRENT DATE AND TIME" in prompt
-    assert "in double
-  quotes" in prompt
+    assert "in double" in prompt and "quotes" in prompt
     assert "Curator's process" in prompt
 
 

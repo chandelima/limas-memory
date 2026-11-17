@@ -15,8 +15,8 @@ USAGE = {
     "input_token_details": {"cache_read": 20},
 }
 
-BEBIDAS = '---\ndescription: "Café sem açúcar"\n---\n# Bebidas\nToma café sem açúcar.\n'
-PROJETO = '---\ndescription: "Projeto limas-memory"\n---\n# limas-memory\nSistema de memória.\n'
+BEVERAGES = '---\ndescription: "Coffee without sugar"\n---\n# Beverages\nDrinks coffee without sugar.\n'
+PROJECT = '---\ndescription: "limas-memory project"\n---\n# limas-memory\nMemory system.\n'
 
 
 class ScriptedModel(FakeMessagesListChatModel):
@@ -36,13 +36,13 @@ def script_for(scenario):
     if scenario.startswith("02"):
         return [
             msg(calls=[("list_memory", {})]),
-            msg(calls=[("write_memory", {"path": "preferencias/bebidas.md", "content": BEBIDAS})]),
-            msg(calls=[("write_memory", {"path": "projetos/limas-memory.md", "content": PROJETO})]),
+            msg(calls=[("write_memory", {"path": "preferences/beverages.md", "content": BEVERAGES})]),
+            msg(calls=[("write_memory", {"path": "projects/limas-memory.md", "content": PROJECT})]),
             msg(calls=[("update_index", {})]),
-            msg(calls=[("commit_memory", {"message": "docs: registra café e projeto"})]),
-            msg("Criados 2 documentos."),
+            msg(calls=[("commit_memory", {"message": "docs: record coffee and project"})]),
+            msg("Created 2 documents."),
         ]
-    return [msg("Nada com valor futuro.")]
+    return [msg("Nothing of future value.")]
 
 
 def good_factory(model, tools, scenario):
@@ -53,8 +53,8 @@ def good_factory(model, tools, scenario):
 def scenarios_dir(tmp_path):
     d = tmp_path / "scenarios_dir"
     d.mkdir()
-    (d / "01_irrelevante.txt").write_text("usuario: bom dia\n", encoding="utf-8")
-    (d / "02_fato_novo.txt").write_text("usuario: tomo café sem açúcar\n", encoding="utf-8")
+    (d / "01_irrelevant.txt").write_text("user: good morning\n", encoding="utf-8")
+    (d / "02_new_fact.txt").write_text("user: I drink coffee without sugar\n", encoding="utf-8")
     return d
 
 
@@ -92,11 +92,11 @@ def test_aggregate_usage_without_cost():
 
 def test_explicit_memory_dir_never_pushes(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "MEMORY_GIT_REMOTE", "https://github.com/x/y.git")
-    monkeypatch.setattr(config, "MEMORY_GIT_TOKEN", "ghp_segredo")
-    _, test_git = make_store_and_git(tmp_path / "teste")
+    monkeypatch.setattr(config, "MEMORY_GIT_TOKEN", "ghp_secret")
+    _, test_git = make_store_and_git(tmp_path / "test")
     assert test_git.remote == "" and test_git.token == ""
     _, real_git = make_store_and_git(None)
-    assert real_git.remote == "https://github.com/x/y.git" and real_git.token == "ghp_segredo"
+    assert real_git.remote == "https://github.com/x/y.git" and real_git.token == "ghp_secret"
     _, forced = make_store_and_git(tmp_path / "x", push=True)
     assert forced.remote == "https://github.com/x/y.git"
 
@@ -104,54 +104,54 @@ def test_explicit_memory_dir_never_pushes(tmp_path, monkeypatch):
 def test_end_to_end_runs_each_model_twice_with_isolated_memories(scenarios_dir, tmp_path):
     code, results, report = run_main(scenarios_dir, tmp_path, "fake/a,fake/b", good_factory)
     assert code == 0
-    assert len(results) == 2 * 2 * 2  # modelos x rodadas x cenários
+    assert len(results) == 2 * 2 * 2  # models x runs x scenarios
     assert all(not r["error"] and all(r["checks"].values()) for r in results)
     a = [r for r in results if r["model"] == "fake/a"]
     assert sum(r["usage"]["input_tokens"] for r in a) == 2 * (1 + 6) * 100
     assert sum(r["usage"]["cache_read"] for r in a) == 2 * (1 + 6) * 20
-    assert "fake/a" in report and "fake/b" in report and "Nenhuma checagem falhou" in report
-    assert "Custo n/d" in report
-    assert len(list((tmp_path).glob("compare-*/fake_a-run*"))) == 2  # uma memória por rodada
+    assert "fake/a" in report and "fake/b" in report and "No check failed" in report
+    assert "Cost n/a" in report
+    assert len(list((tmp_path).glob("compare-*/fake_a-run*"))) == 2  # one memory per run
 
 
 def test_failing_check_is_reported(scenarios_dir, tmp_path):
     def sloppy(model, tools, scenario):
-        # no cenário 01 grava algo indevido
+        # in scenario 01 it writes something it should not
         if scenario.startswith("01"):
             script = [
-                msg(calls=[("write_memory", {"path": "lixo.md", "content": BEBIDAS})]),
-                msg("Gravei."),
+                msg(calls=[("write_memory", {"path": "junk.md", "content": BEVERAGES})]),
+                msg("Written."),
             ]
             return build_curator(llm=ScriptedModel(responses=script), tools=tools)
         return good_factory(model, tools, scenario)
 
     _, results, report = run_main(scenarios_dir, tmp_path, "fake/a", sloppy, runs=1)
     r01 = next(r for r in results if r["scenario"].startswith("01"))
-    assert r01["checks"]["nao_gravou"] is False and r01["checks"]["sem_commit"] is True
-    assert "- fake/a #1 01_irrelevante: nao_gravou" in report
+    assert r01["checks"]["wrote_nothing"] is False and r01["checks"]["no_commit"] is True
+    assert "- fake/a #1 01_irrelevant: wrote_nothing" in report
 
 
 def test_tool_errors_are_counted(scenarios_dir, tmp_path):
     def with_error(model, tools, scenario):
         if scenario.startswith("01"):
-            script = [msg(calls=[("write_memory", {"path": "a.md", "content": "sem frontmatter"})]),
-                      msg("Falhou.")]
+            script = [msg(calls=[("write_memory", {"path": "a.md", "content": "no frontmatter"})]),
+                      msg("Failed.")]
             return build_curator(llm=ScriptedModel(responses=script), tools=tools)
         return good_factory(model, tools, scenario)
 
     _, results, report = run_main(scenarios_dir, tmp_path, "fake/a", with_error, runs=1)
     r01 = next(r for r in results if r["scenario"].startswith("01"))
     assert r01["tool_calls"] == 1 and r01["tool_errors"] == 1
-    assert r01["checks"]["sem_erro_de_tool"] is False
+    assert r01["checks"]["no_tool_errors"] is False
     assert r01["tool_error_messages"][0].startswith("write_memory(")
     assert "description" in r01["tool_error_messages"][0]
-    assert "Erros de tool" in report and "01_irrelevante: write_memory(" in report
+    assert "Tool errors" in report and "01_irrelevant: write_memory(" in report
 
 
 def test_model_error_is_recorded_and_run_continues(scenarios_dir, tmp_path):
     def flaky(model, tools, scenario):
         if model == "fake/bad":
-            raise RuntimeError("400: temperature não suportado")
+            raise RuntimeError("400: temperature not supported")
         return good_factory(model, tools, scenario)
 
     code, results, report = run_main(scenarios_dir, tmp_path, "fake/bad,fake/a", flaky, runs=1)
@@ -159,13 +159,13 @@ def test_model_error_is_recorded_and_run_continues(scenarios_dir, tmp_path):
     bad = [r for r in results if r["model"] == "fake/bad"]
     assert len(bad) == 2 and all("temperature" in r["error"] and r["checks"] == {} for r in bad)
     assert all(all(r["checks"].values()) for r in results if r["model"] == "fake/a")
-    assert "Execuções com erro" in report and "ERRO" in report
+    assert "Runs with errors" in report and "ERROR" in report
 
 
 def test_scenario_04_and_05_checks():
-    # a lógica de texto das checagens, sem agente: tolera acentos e maiúsculas
+    # the text logic of the checks, without an agent: tolerates accents and uppercase
     assert compare.norm("CAFÉ Açúcar HIPÓTESE") == "cafe acucar hipotese"
-    assert compare._has("Toma Café sem Açúcar", "cafe", "acucar")
+    assert compare._has("Drinks Coffee without Sugar", "coffee", "sugar")
 
 
 def test_requires_api_key_for_real_runs(scenarios_dir, tmp_path, monkeypatch, capsys):
@@ -175,22 +175,23 @@ def test_requires_api_key_for_real_runs(scenarios_dir, tmp_path, monkeypatch, ca
 
 
 def test_rejects_empty_inputs(tmp_path, capsys):
-    empty = tmp_path / "vazio"
+    empty = tmp_path / "empty"
     empty.mkdir()
     assert compare.main(["--scenarios", str(empty)], factory=good_factory) == 2
 
 
 @pytest.mark.parametrize(
     "text",
-    ["## Contradição em aberto", "Status: não resolvido", "informação contestada", "Em revisão", "contraditória"],
+    ["## Open contradiction", "Status: unresolved", "contested information", "Under review", "contradictory"],
 )
 def test_contest_markers_cover_common_wordings(text):
     assert any(m in compare.norm(text) for m in compare.CONTEST_MARKERS)
 
 
 def _checks(tmp_path, key, docs_before, docs_after):
-    from compare import ScenarioRun, Snapshot, run_checks
     from datetime import datetime
+
+    from compare import ScenarioRun, Snapshot, run_checks
     from storage.store import MemoryStore
 
     store = MemoryStore(tmp_path / "m")
@@ -208,22 +209,22 @@ def doc(title, body, desc="d"):
     return f'---\ndescription: "{desc}"\n---\n{heading}{body}\n'
 
 
-def test_check_docs_com_titulo(tmp_path):
+def test_check_docs_have_title(tmp_path):
     ok = _checks(tmp_path, "03", {}, {"a.md": doc("A", "x")})
     bad = _checks(tmp_path / "b", "03", {}, {"a.md": doc(None, "x")})
-    assert ok["docs_com_titulo"] is True and bad["docs_com_titulo"] is False
+    assert ok["docs_have_title"] is True and bad["docs_have_title"] is False
 
 
-def test_check_secao_contestado_needs_a_heading_not_just_the_word(tmp_path):
-    with_heading = _checks(tmp_path, "04", {}, {"a.md": doc("B", "## Contestado\n- café sem açúcar\nchá")})
-    only_word = _checks(tmp_path / "b", "04", {}, {"a.md": doc("B", "café contestado\nchá")})
-    assert with_heading["secao_contestado"] is True
-    assert only_word["secao_contestado"] is False and only_word["marcou_contradicao"] is True
+def test_check_contested_section_needs_a_heading_not_just_the_word(tmp_path):
+    with_heading = _checks(tmp_path, "04", {}, {"a.md": doc("B", "## Contested\n- coffee without sugar\ntea")})
+    only_word = _checks(tmp_path / "b", "04", {}, {"a.md": doc("B", "contested coffee\ntea")})
+    assert with_heading["contested_section"] is True
+    assert only_word["contested_section"] is False and only_word["flagged_contradiction"] is True
 
 
-def test_check_secao_hipoteses_and_year(tmp_path):
-    good = doc("Lisboa", "## Hipóteses (não verificadas)\n- custo menor\nMudança em 2027")
-    prose = doc("Lisboa", "Palpite não verificado sobre Lisboa em 2027")
-    assert _checks(tmp_path, "05", {}, {"l.md": good})["secao_hipoteses"] is True
+def test_check_hypotheses_section_and_year(tmp_path):
+    good = doc("Lisbon", "## Hypotheses (unverified)\n- lower cost\nMove in 2027")
+    prose = doc("Lisbon", "Unverified guess about Lisbon in 2027")
+    assert _checks(tmp_path, "05", {}, {"l.md": good})["hypotheses_section"] is True
     r = _checks(tmp_path / "b", "05", {}, {"l.md": prose})
-    assert r["secao_hipoteses"] is False and r["marcou_hipotese"] is True and r["converteu_ano"] is True
+    assert r["hypotheses_section"] is False and r["flagged_hypothesis"] is True and r["converted_year"] is True

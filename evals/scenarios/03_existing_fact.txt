@@ -1,2 +1,2 @@
-usuario: Falando em café, eu tomo sempre de manhã, antes de começar a trabalhar, e continuo sem açúcar.
-usuario: Também gosto de café coado, não de cápsula.
+user: Speaking of coffee, I always drink it in the morning, before I start working, and I still take it without sugar.
+user: I also like brewed coffee, not capsules.

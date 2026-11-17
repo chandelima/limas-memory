@@ -1,15 +1,15 @@
-"""Camada de log da aplicação: console + um canal do Telegram.
+"""Application logging layer: console + a Telegram channel.
 
-- Console: todos os eventos a partir de LOG_LEVEL (padrão INFO), com hora, nível e origem.
-- Canal do Telegram (LOG_CHANNEL_ID): só o que importa (a partir de LOG_CHANNEL_LEVEL, padrão
-  WARNING, mais os avisos de ciclo de vida marcados com extra={"channel": True}), enviado em
-  lote, sem repetir linhas iguais seguidas e sem estourar o limite de mensagens do Telegram.
-- Privacidade: os logs registram IDs, contagens, durações e o tipo/mensagem de erros; nunca o
-  texto das suas mensagens, o conteúdo da memória nem o relatório do Curator. Segredos
-  (token do bot, chaves de API, tokens do git) são mascarados em todos os destinos.
+- Console: every event from LOG_LEVEL up (default INFO), with time, level and origin.
+- Telegram channel (LOG_CHANNEL_ID): only what matters (from LOG_CHANNEL_LEVEL up, default
+  WARNING, plus lifecycle notices marked with extra={"channel": True}), sent in batches,
+  without repeating identical consecutive lines and without exceeding Telegram's message limit.
+- Privacy: logs record IDs, counts, durations and the type/message of errors; never the text of
+  your messages, the memory content or the Curator's report. Secrets (bot token, API keys,
+  git tokens) are masked in every destination.
 
-Os logs do próprio envio ao canal (logger "limas.logship") vão só para o console, para que uma
-falha ao enviar não gere mais logs a enviar.
+The logs of the channel sending itself (logger "limas.logship") go only to the console, so that
+a failure to send does not generate more logs to send.
 """
 
 import asyncio
@@ -24,13 +24,13 @@ import config
 
 ROOT_NAME = "limas"
 SHIP_NAME = f"{ROOT_NAME}.logship"
-CHANNEL_LIMIT = 3900  # margem sob o limite de 4096 caracteres do Telegram
+CHANNEL_LIMIT = 3900  # margin under Telegram's 4096-character limit
 _HANDLER_MARK = "_limas_console"
 
 _PATTERNS = [
-    re.compile(r"\d{6,}:[A-Za-z0-9_-]{30,}"),  # token de bot do Telegram (na URL vem colado em "bot")
-    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),  # chaves tipo sk-...
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),  # tokens do GitHub
+    re.compile(r"\d{6,}:[A-Za-z0-9_-]{30,}"),  # Telegram bot token (in the URL it comes glued to "bot")
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),  # sk-... style keys
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),  # GitHub tokens
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"(?i)\bAuthorization:\s*\S+(?:\s+\S+)?"),
     re.compile(r"(?i)\b(api[_-]?key|secret|token|password|senha)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-/+=]{12,}"),
@@ -42,7 +42,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def known_secrets() -> list[str]:
-    """Valores sensíveis da configuração atual (lidos na hora, para acompanhar mudanças)."""
+    """Sensitive values of the current configuration (read on the spot, to follow changes)."""
     values = (config.TELEGRAM_BOT_TOKEN, config.OPENROUTER_API_KEY, config.MEMORY_GIT_TOKEN)
     return [v for v in values if v and len(v) >= 8]
 
@@ -56,7 +56,7 @@ def redact(text: str, secrets: Iterable[str] | None = None) -> str:
 
 
 class RedactingFormatter(logging.Formatter):
-    """Formata e mascara segredos, inclusive no texto de exceções."""
+    """Format and mask secrets, including in exception text."""
 
     def format(self, record: logging.LogRecord) -> str:
         return redact(super().format(record))
@@ -70,7 +70,7 @@ def parse_level(value: str | int, default: int) -> int:
 
 
 def parse_channel_id(value: str) -> int | str | None:
-    """'-1001234567890' -> int; '@meucanal' -> str; vazio -> None (canal desligado)."""
+    """'-1001234567890' -> int; '@mychannel' -> str; empty -> None (channel disabled)."""
     value = (value or "").strip()
     if not value:
         return None
@@ -78,14 +78,14 @@ def parse_channel_id(value: str) -> int | str | None:
         return int(value)
     if value.startswith("@") and len(value) > 1:
         return value
-    raise ValueError(f"LOG_CHANNEL_ID inválido: '{value}' (use o ID numérico, como -1001234567890, ou @nomedocanal)")
+    raise ValueError(f"invalid LOG_CHANNEL_ID: '{value}' (use the numeric ID, like -1001234567890, or @channelname)")
 
 
-# ---- canal do Telegram: fila na emissão, envio em lote por uma tarefa -----------------------
+# ---- Telegram channel: queue on emit, batch sending by a task --------------------------------
 
 
 class ChannelHandler(logging.Handler):
-    """Coloca numa fila (sem bloquear e seguro entre threads) os registros que vão ao canal."""
+    """Put in a queue (non-blocking and thread-safe) the records that go to the channel."""
 
     def __init__(self, level: int = logging.WARNING, maxsize: int = 500):
         super().__init__(logging.DEBUG)
@@ -95,21 +95,21 @@ class ChannelHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.name == SHIP_NAME or record.name.startswith(SHIP_NAME + "."):
-            return  # o envio do próprio log nunca volta para a fila
+            return  # the log sending itself never goes back into the queue
         if record.levelno < self.min_level and not getattr(record, "channel", False):
             return
         try:
             line = self.channel_line(record)
             try:
                 self.queue.put_nowait(line)
-            except queue.Full:  # descarta a mais antiga e conta
+            except queue.Full:  # drop the oldest and count it
                 try:
                     self.queue.get_nowait()
                 except queue.Empty:
                     pass
                 self.dropped += 1
                 self.queue.put_nowait(line)
-        except Exception:  # noqa: BLE001 - log nunca derruba o programa
+        except Exception:  # noqa: BLE001 - logging never takes the program down
             self.handleError(record)
 
     @staticmethod
@@ -118,12 +118,12 @@ class ChannelHandler(logging.Handler):
         text = f"{stamp} #{record.levelname} {record.name.removeprefix(ROOT_NAME + '.')}: {record.getMessage()}"
         if record.exc_info and record.exc_info[1] is not None:
             err = record.exc_info[1]
-            text += f" [{type(err).__name__}: {err}]"  # só tipo e mensagem; o traceback fica no console
-        return " ".join(redact(text).split())  # uma linha só
+            text += f" [{type(err).__name__}: {err}]"  # only type and message; the traceback stays on the console
+        return " ".join(redact(text).split())  # a single line
 
 
 def pack(lines: list[str], limit: int = CHANNEL_LIMIT) -> list[str]:
-    """Junta linhas em mensagens de até `limit` caracteres (linha enorme é cortada)."""
+    """Join lines into messages of up to `limit` characters (a huge line is cut)."""
     messages, current = [], ""
     for line in lines:
         line = line if len(line) <= limit else line[: limit - 1] + "…"
@@ -137,7 +137,7 @@ def pack(lines: list[str], limit: int = CHANNEL_LIMIT) -> list[str]:
 
 
 def collapse(lines: list[str]) -> list[str]:
-    """Junta linhas iguais seguidas (ignorando a hora): 'X' 'X' 'X' -> 'X (x3)'."""
+    """Join identical consecutive lines (ignoring the time): 'X' 'X' 'X' -> 'X (x3)'."""
     out: list[tuple[str, int]] = []
     for line in lines:
         key = line.split(" ", 1)[1] if " " in line else line
@@ -149,7 +149,7 @@ def collapse(lines: list[str]) -> list[str]:
 
 
 class LogShipper:
-    """Esvazia a fila do ChannelHandler a cada `flush_seconds` e envia em lote ao canal."""
+    """Empty the ChannelHandler queue every `flush_seconds` and send it to the channel in a batch."""
 
     def __init__(
         self,
@@ -167,7 +167,7 @@ class LogShipper:
         self.min_interval = min_interval
         self.header = header
         self.keep_on_failure = keep_on_failure
-        self._pending: list[str] = []  # linhas que falharam ao enviar, para tentar de novo
+        self._pending: list[str] = []  # lines that failed to send, to try again
         self._last_sent = 0.0
         self._log = logging.getLogger(SHIP_NAME)
 
@@ -179,12 +179,12 @@ class LogShipper:
             except queue.Empty:
                 break
         if self.handler.dropped:
-            lines.append(f"({self.handler.dropped} linhas de log descartadas por excesso)")
+            lines.append(f"({self.handler.dropped} log lines dropped due to overflow)")
             self.handler.dropped = 0
         return lines
 
     async def flush(self) -> int:
-        """Envia o que há na fila. Devolve quantas mensagens foram enviadas."""
+        """Send what is in the queue. Return how many messages were sent."""
         lines = collapse(self._drain())
         if not lines:
             return 0
@@ -196,8 +196,8 @@ class LogShipper:
                 await asyncio.sleep(wait)
             try:
                 await self.send(message)
-            except Exception as exc:  # noqa: BLE001 - guarda o resto para a próxima tentativa
-                self._log.warning("não consegui enviar o log ao canal: %s: %s", type(exc).__name__, exc)
+            except Exception as exc:  # noqa: BLE001 - keep the rest for the next attempt
+                self._log.warning("could not send the log to the channel: %s: %s", type(exc).__name__, exc)
                 rest = [ln for m in messages[i:] for ln in m.split("\n") if not (self.header and ln == self.header)]
                 self._pending = rest[-self.keep_on_failure:]
                 return sent
@@ -212,16 +212,16 @@ class LogShipper:
             except asyncio.TimeoutError:
                 pass
             await self.flush()
-        await self.flush()  # despedida: o que sobrou ao encerrar
+        await self.flush()  # farewell: what is left on shutdown
 
 
-# ---- configuração ------------------------------------------------------------------------------------
+# ---- configuration -----------------------------------------------------------------------------------
 
 
 def configure_logging(console_level: int | str = logging.INFO, channel_level: int | str = logging.WARNING,
                       channel: bool = False) -> ChannelHandler | None:
-    """Liga o console (e, se `channel`, a fila do canal). Pode ser chamada várias vezes.
-    Devolve o ChannelHandler quando o canal está ligado."""
+    """Turn on the console (and, if `channel`, the channel queue). Can be called several times.
+    Return the ChannelHandler when the channel is on."""
     console_level = parse_level(console_level, logging.INFO)
     root = logging.getLogger()
     for h in [h for h in root.handlers if getattr(h, _HANDLER_MARK, False)]:
@@ -232,7 +232,7 @@ def configure_logging(console_level: int | str = logging.INFO, channel_level: in
     setattr(console, _HANDLER_MARK, True)
     root.addHandler(console)
     root.setLevel(min(console_level, logging.WARNING))
-    # bibliotecas ficam em WARNING: o httpx loga a URL de cada chamada, e ela contém o token do bot
+    # libraries stay at WARNING: httpx logs the URL of every call, and it contains the bot token
     for name in ("httpx", "httpx2", "httpcore", "telegram", "apscheduler"):
         logging.getLogger(name).setLevel(logging.WARNING)
     app = logging.getLogger(ROOT_NAME)
