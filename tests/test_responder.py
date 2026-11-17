@@ -102,7 +102,7 @@ def test_reply_cannot_write_even_if_model_tries(store):
     assert not (store.root / "x.md").exists()
 
 
-def test_prompt_asks_plain_text_and_reading_documents_before_answering():
+def test_prompt_asks_reading_documents_before_answering_and_has_no_style_section():
     prompt = load_system_prompt()
-    assert "TEXTO SIMPLES" in prompt and "sem Markdown" in prompt
     assert "LEIA-O com" in prompt
+    assert "ESTILO" not in prompt  # o texto simples fica por conta do gateway (to_plain)
