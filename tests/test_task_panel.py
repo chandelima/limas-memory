@@ -152,3 +152,39 @@ def test_removal_asks_for_confirmation_first_and_cancel_goes_back_to_the_card(ta
         panel.build_confirm_remove(tasks, task.id, TODAY)
     with pytest.raises(Exception):
         panel.remove(tasks, task.id)
+
+
+def test_a_weekly_task_shows_today_and_its_next_occurrence_in_the_list(tasks):
+    # today is Wednesday: "Wash clothes" repeats on Wednesdays and Thursdays (the reported case)
+    tasks.add("Wash clothes", recurrence=Recurrence.parse("weekly wed,thu"))
+    _, rows = panel.build_panel(tasks)
+    assert labels(rows) == ["⭕ [Today] Wash clothes", "⭕ [Tomorrow] Wash clothes"]
+    today_action, tomorrow_action = (panel.decode(r[0][1]) for r in rows)
+    assert today_action.day == TODAY and tomorrow_action.day == date(2026, 11, 19)  # each button knows its day
+    _, week = panel.build_panel(tasks, "week")  # 7 days: Wed 18, Thu 19 and Wed 25 (Thu 26 is outside)
+    assert [panel.decode(r[0][1]).day for r in week] == [TODAY, date(2026, 11, 19), date(2026, 11, 25)]
+
+
+def test_a_daily_task_still_shows_only_today(tasks):
+    tasks.add("Medication", recurrence=Recurrence.parse("daily"))
+    assert len(panel.build_panel(tasks)[1]) == 1
+
+
+def test_the_card_of_a_future_occurrence_says_the_day_and_has_no_check_button(tasks):
+    task = tasks.add("Wash clothes", recurrence=Recurrence.parse("weekly wed,thu"), due_time=time(19, 0))
+    tomorrow = date(2026, 11, 19)
+    text, rows = panel.build_detail(tasks, task.id, tomorrow)
+    assert "Repeats: weekly wed,thu 19:00" in text and "When: Tomorrow 19:00" in text
+    assert [r[0][0] for r in rows] == ["🗑️ Remove task", "⬅️ Back to the list"]  # no "mark as done" yet
+    today_text, today_rows = panel.build_detail(tasks, task.id, TODAY)
+    assert "When:" not in today_text and today_rows[0][0][0] == "🟢 Mark as done"  # today's card is as before
+
+
+def test_a_stale_tap_cannot_complete_a_future_occurrence(tasks):
+    task = tasks.add("Wash clothes", recurrence=Recurrence.parse("weekly wed,thu"))
+    with pytest.raises(TaskError, match="still in the future"):
+        panel.toggle(tasks, task.id, date(2026, 11, 19))
+    assert tasks.load().done == []
+    assert panel.toggle(tasks, task.id, TODAY) == ("Wash clothes", True)  # today's occurrence works as always
+    _, rows = panel.build_panel(tasks)
+    assert labels(rows) == ["🟢 [Today] Wash clothes", "⭕ [Tomorrow] Wash clothes"]  # only today's got checked

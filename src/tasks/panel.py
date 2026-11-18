@@ -36,7 +36,7 @@ class PanelItem:
     id: str
     text: str
     done: bool
-    on: date  # day of the occurrence (today's, for recurring tasks)
+    on: date  # day of the occurrence (today's, or a later day for a future occurrence of a recurring task)
     due: date | None = None  # day of the appointment (None = no date)
     at: time | None = None  # time of the appointment
     when: str = ""  # button prefix, e.g. "[Tomorrow 07:00]" (built in build_items)
@@ -84,8 +84,9 @@ def build_items(tasks: TaskStore, scope: str = "today", tag: str = "") -> tuple[
             items.append(PanelItem(i.task.id, i.task.text, i.done, today, today, i.when))
         for day, day_items in agenda.upcoming.items():
             for i in day_items:
-                if not i.recurring:  # a future occurrence of a recurring task cannot be checked before its day
-                    items.append(PanelItem(i.task.id, i.task.text, False, today, day, i.when))
+                # a future occurrence of a recurring task is listed too (its card has no check button yet)
+                items.append(PanelItem(i.task.id, i.task.text, i.recurring and i.done,
+                                       day if i.recurring else today, day, i.when))
         for t in agenda.undated:
             items.append(PanelItem(t.id, t.text, False, today))
         recurring_ids = {r.id for r in tl.recurring}
@@ -178,13 +179,17 @@ def build_detail(tasks: TaskStore, task_id: str, on: date, scope: str = "today",
     at = fmt_time(item.due_time)
     if recurrence is not None:
         lines.append(t("detail_repeats", rule=f"{recurrence.render()}{' ' + at if at else ''}"))
+        if on != today:  # the card of a particular (future) occurrence says which day it is
+            lines.append(t("detail_when", when=f"{day_name(on, today)}{' ' + at if at else ''}"))
     elif item.due_date is not None:
         lines.append(t("detail_when", when=f"{day_name(item.due_date, today)}{' ' + at if at else ''}"))
     else:
         lines.append(t("detail_no_date"))
     if item.ref:
         lines.append(t("detail_see", ref=item.ref))
-    rows = [[(t("btn_reopen" if done else "btn_complete"), encode_toggle(task_id, on, scope, tag))]]
+    rows = []
+    if on <= today:  # a future occurrence cannot be checked before its day
+        rows.append([(t("btn_reopen" if done else "btn_complete"), encode_toggle(task_id, on, scope, tag))])
     if not done:  # a completed one-off task is history: only pending and recurring ones can be removed
         rows.append([(t("btn_remove"), encode_action(ASK_REMOVE, task_id, on, scope, tag))])
     rows.append([(t("btn_back"), encode_back(scope, tag))])
@@ -210,6 +215,8 @@ def remove(tasks: TaskStore, task_id: str) -> str:
 
 def toggle(tasks: TaskStore, task_id: str, on: date) -> tuple[str, bool]:
     """Flip the task's current state. Return (text, completed now?)."""
+    if on > tasks.today():
+        raise TaskError(t("task_future"))
     tl = tasks.load()
     if rec := next((t for t in tl.recurring if t.id == task_id), None):
         if any(c.id == task_id and c.done_on == on for c in tl.done):

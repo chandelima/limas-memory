@@ -43,6 +43,7 @@ CATALOG: dict[str, str] = {
     "task_reopened": "⭕ Reopened: {text}",
     "task_failed": "Could not: {error}",
     "task_gone": "that task no longer exists",
+    "task_future": "that occurrence is still in the future",
     "task_update_error": "I had a problem updating the task.",
     "file_unsupported": "For now I only read PDFs and images (JPG, PNG, WebP or GIF).",
     "file_too_big": "That file exceeds the 20 MB limit.",
